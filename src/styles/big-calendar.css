@@ -1,0 +1,86 @@
+.rbc-theme-rtc {
+  color: hsl(var(--foreground));
+  background-color: transparent;
+}
+
+.rbc-theme-rtc .rbc-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid hsl(var(--border));
+  margin-bottom: 1rem;
+}
+
+.rbc-theme-rtc .rbc-toolbar button {
+  border-radius: 0.5rem;
+  border: 1px solid hsl(var(--border));
+  background-color: color-mix(in srgb, hsl(var(--muted)) 60%, transparent);
+  color: hsl(var(--foreground));
+  padding: 0.35rem 0.8rem;
+  font-size: 0.85rem;
+  font-weight: 500;
+  transition: all 0.2s ease;
+}
+
+.rbc-theme-rtc .rbc-toolbar button:focus,
+.rbc-theme-rtc .rbc-toolbar button:hover {
+  border-color: hsl(var(--primary));
+  background-color: color-mix(in srgb, hsl(var(--primary)) 20%, transparent);
+  color: hsl(var(--primary));
+}
+
+.rbc-theme-rtc .rbc-month-view,
+.rbc-theme-rtc .rbc-time-view,
+.rbc-theme-rtc .rbc-agenda-view {
+  border-radius: 0.75rem;
+  border: 1px solid hsl(var(--border));
+  background-color: color-mix(in srgb, hsl(var(--background)) 85%, transparent);
+}
+
+.rbc-theme-rtc .rbc-month-row + .rbc-month-row,
+.rbc-theme-rtc .rbc-time-header-content,
+.rbc-theme-rtc .rbc-agenda-view table tbody > tr + tr {
+  border-color: hsl(var(--border));
+}
+
+.rbc-theme-rtc .rbc-date-cell {
+  text-align: right;
+  padding: 0.35rem 0.75rem;
+  font-size: 0.75rem;
+  font-weight: 500;
+  color: hsl(var(--muted-foreground));
+}
+
+.rbc-theme-rtc .rbc-off-range {
+  color: color-mix(in srgb, hsl(var(--muted-foreground)) 55%, transparent);
+}
+
+.rbc-theme-rtc .rbc-today {
+  background-color: color-mix(in srgb, hsl(var(--primary)) 15%, transparent);
+}
+
+.rbc-theme-rtc .rbc-time-gutter span,
+.rbc-theme-rtc .rbc-header {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: hsl(var(--foreground));
+}
+
+.rbc-theme-rtc .rbc-event,
+.rbc-theme-rtc .rbc-day-slot .rbc-background-event {
+  box-shadow: none;
+}
+
+.rbc-theme-rtc .rbc-event-content {
+  white-space: normal;
+}
+
+.rbc-theme-rtc .rbc-agenda-event-cell {
+  font-size: 0.9rem;
+}
+
+.rbc-theme-rtc .rbc-agenda-time-cell {
+  color: hsl(var(--muted-foreground));
+}

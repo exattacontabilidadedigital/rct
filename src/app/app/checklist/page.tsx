@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CalendarClock, ListChecks, Plus, TrendingUp, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
@@ -41,6 +41,10 @@ const DEFAULT_BOARD_FORM: BoardFormState = {
   template: "essencial",
 };
 
+const DEFAULT_REFORMA_BOARD_NAME = "Checklist Reforma Tributária 2026";
+const DEFAULT_REFORMA_BOARD_DESCRIPTION =
+  "Sequência guiada para adaptação do CRT 3 ao IBS/CBS com foco em governança, sistemas e eventos eletrônicos.";
+
 function formatUpdatedAt(value?: string) {
   if (!value) return "Atualização indisponível";
   const date = new Date(value);
@@ -63,11 +67,30 @@ export default function ChecklistPage() {
   const boards = checklists;
   const [boardDialog, setBoardDialog] = useState<BoardDialogState>({ open: false });
   const [boardForm, setBoardForm] = useState<BoardFormState>(DEFAULT_BOARD_FORM);
+  const seededChecklist = useRef(false);
 
   const riskBadge = companySeverity ?? severityConfig.laranja;
 
   const metrics = useMemo(() => analyzeChecklistBoards(boards), [boards]);
   const completionRate = metrics.totalTasks ? Math.round((metrics.completedTasks / metrics.totalTasks) * 100) : 0;
+
+  useEffect(() => {
+    if (loading || !company || seededChecklist.current) {
+      return;
+    }
+
+    const hasReformaChecklist = boards.some((board) => board.name === DEFAULT_REFORMA_BOARD_NAME);
+
+    if (!hasReformaChecklist) {
+      createChecklistBoard(company.id, {
+        name: DEFAULT_REFORMA_BOARD_NAME,
+        description: DEFAULT_REFORMA_BOARD_DESCRIPTION,
+        template: "essencial",
+      });
+    }
+
+    seededChecklist.current = true;
+  }, [boards, company, createChecklistBoard, loading]);
 
   if (loading || !user) {
     return (

@@ -1,12 +1,14 @@
 "use client";
 
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { parseISO } from "date-fns";
 
 import {
   buildChecklistNotifications,
   calculateChecklistProgressFromBoards,
   checklistStatuses,
   createDefaultChecklistBoard,
+  inferBlueprintDueDate,
   instantiateChecklistBlueprint,
 } from "@/lib/checklist";
 import type {
@@ -321,6 +323,18 @@ function sanitizeTask(
 ): ChecklistTask {
   const createdAt = task.createdAt ?? fallbackTimestamp;
   const updatedAt = task.updatedAt ?? createdAt;
+  const rawDueDate = typeof task.dueDate === "string" ? task.dueDate.trim() : task.dueDate;
+  const hasManualUpdates = Boolean(task.updatedAt) && task.updatedAt !== task.createdAt;
+
+  let dueDate = rawDueDate && rawDueDate.length ? rawDueDate : undefined;
+
+  if (!dueDate && task.id) {
+    const referenceDate = parseISO(createdAt);
+    const inferred = inferBlueprintDueDate(task.id, referenceDate);
+    if (inferred && !hasManualUpdates) {
+      dueDate = inferred;
+    }
+  }
 
   return {
     id: task.id ?? generateId("task"),
@@ -331,7 +345,7 @@ function sanitizeTask(
     status: sanitizeStatus(task.status),
     owner: task.owner ?? "Equipe",
     category: sanitizeCategory(task.category),
-    dueDate: task.dueDate,
+  dueDate,
     phase: sanitizePhase(task.phase),
     pillar: sanitizePillar(task.pillar),
     priority: sanitizePriority(task.priority),

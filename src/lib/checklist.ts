@@ -69,79 +69,113 @@ type BlueprintPhaseDefinition = {
 export type ChecklistBlueprintTask = BlueprintTaskDefinition;
 export type ChecklistBlueprintPhase = BlueprintPhaseDefinition;
 
-const CRT3_BLUEPRINT: ChecklistBlueprintPhase[] = [
+const REFORMA_2026_BLUEPRINT: ChecklistBlueprintPhase[] = [
   {
-    id: "fase-fundamentos",
+    id: "fase-fundamentos-reforma-2026",
     phase: "Fundamentos",
-    title: "Fundamentos da Reforma",
-    summary: "Estabeleça governança e entendimento do impacto financeiro.",
-    milestone: "Comitê instituído e diagnóstico inicial concluído",
-    focus: ["Governança", "Impacto financeiro", "Mapa de riscos"],
+    title: "Conhecimento, Governança e Adequação Legal",
+    summary:
+      "Garante aderência aos princípios do novo STN (simplicidade, transparência, justiça e cooperação) e define governança para o IBS/CBS.",
+    milestone: "CRT 3 confirmado, regimes especiais mapeados e cadastros oficiais habilitados",
+    focus: ["CRT 3", "Regimes especiais", "Cadastros oficiais"],
     tasks: [
       {
-        id: "fundamentos-impacto-financeiro",
-        title: "Quantificar impacto financeiro da CBS/IBS",
-        description: "Consolide cenários de crédito, débito e regimes especiais para a transição.",
+        id: "fundamentos-regime-tributario",
+        title: "Confirmação do regime tributário",
+        description:
+          "Verificar o CRT: confirmar se a empresa está no Regime Regular (CRT 3), com obrigação de informar IBS/CBS na NF-e a partir de 05/01/2026. Registrar o resultado e comunicar áreas afetadas. Observação: contribuintes do Simples Nacional (CRT 1, 2 ou 4) só informam IBS/CBS em 2027.",
         category: "Planejamento",
-        severity: "vermelho",
-        owner: "Equipe Financeira",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
         priority: "alta",
         phase: "Fundamentos",
         pillar: "Governança & Estratégia",
-        dueInDays: 10,
+        dueInDays: 5,
         status: "todo",
         references: [
           {
-            label: "Guia rápido da Reforma Tributária",
-            type: "guia",
-            url: "https://www.gov.br/economia/pt-br/assuntos/reforma-tributaria",
+            label: "LC 214/25 - Art. 46 e 47",
+            type: "legislação",
           },
           {
-            label: "Modelo de simulação CBS/IBS",
-            type: "template",
+            label: "EC 132/23 - Disposições transitórias",
+            type: "legislação",
           },
         ],
         evidences: [
           {
-            label: "Relatório de impacto financeiro",
+            label: "Relatório de enquadramento CRT",
             status: "pendente",
           },
         ],
-        tags: ["crt3", "fundamentos", "financeiro"],
+        tags: ["reforma-2026", "fase1", "governanca"],
       },
       {
-        id: "fundamentos-comite-reforma",
-        title: "Formar comitê da Reforma Tributária",
-        description: "Defina representantes de finanças, fiscal, tecnologia e jurídico para governança.",
-        category: "Planejamento",
-        severity: "laranja",
-        owner: "Diretoria",
-        priority: "media",
+        id: "fundamentos-regimes-especiais",
+        title: "Identificação de regimes especiais",
+        description:
+          "Definir a tributação: identificar produtos, serviços ou filiais enquadrados em regimes específicos ou diferenciados (reduções de 30% ou 60%, regime financeiro, imóveis, entre outros) previstos na LC 214/25.",
+        category: "Compliance",
+        severity: "vermelho",
+        owner: "Consultoria Tributária",
+        priority: "alta",
         phase: "Fundamentos",
-        pillar: "Governança & Estratégia",
-        dueInDays: 5,
-        status: "doing",
+        pillar: "Processos & Obrigações",
+        dueInDays: 8,
+        status: "todo",
         references: [
           {
-            label: "Estrutura sugerida de comitê",
-            type: "material",
+            label: "LC 214/25 - Arts. 82 a 89",
+            type: "legislação",
+          },
+          {
+            label: "EC 132/23 - Regimes específicos",
+            type: "legislação",
           },
         ],
         evidences: [
           {
-            label: "Ata de constituição do comitê",
-            status: "em revisão",
+            label: "Matriz de regimes especiais",
+            status: "pendente",
           },
         ],
-        tags: ["crt3", "fundamentos", "governanca"],
+        tags: ["reforma-2026", "fase1", "regimes"],
       },
       {
-        id: "fundamentos-matriz-riscos",
-        title: "Atualizar matriz de riscos tributários",
-        description: "Mapeie riscos críticos e defina tolerâncias para a fase de implementação.",
+        id: "fundamentos-cadastro-unico",
+        title: "Cadastro único (CPF/CNPJ)",
+        description:
+          "Garantir o registro obrigatório: confirmar que todas as pessoas físicas, jurídicas e entidades sujeitas ao IBS/CBS constam no cadastro com identificação única (CPF/CNPJ) administrado pela RFB, saneando eventuais inconsistências (Art. 59).",
         category: "Compliance",
         severity: "laranja",
-        owner: "Consultoria",
+        owner: "Equipe Fiscal",
+        priority: "media",
+        phase: "Fundamentos",
+        pillar: "Dados & Cadastros",
+        dueInDays: 12,
+        status: "todo",
+        references: [
+          {
+            label: "LC 214/25 - Art. 59",
+            type: "legislação",
+          },
+        ],
+        evidences: [
+          {
+            label: "Protocolo de atualização cadastral",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase1", "cadastro"],
+      },
+      {
+        id: "fundamentos-dte-unificado",
+        title: "Habilitação ao Domicílio Tributário Eletrônico",
+        description:
+          "Efetuar a habilitação no Domicílio Tributário Eletrônico (DTE) unificado, designar responsáveis e estabelecer rotina de monitoramento diário das comunicações oficiais.",
+        category: "Compliance",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
         priority: "media",
         phase: "Fundamentos",
         pillar: "Processos & Obrigações",
@@ -149,286 +183,451 @@ const CRT3_BLUEPRINT: ChecklistBlueprintPhase[] = [
         status: "todo",
         references: [
           {
-            label: "Checklist de riscos CRT-3",
+            label: "LC 214/25 - Art. 61",
+            type: "legislação",
+          },
+        ],
+        evidences: [
+          {
+            label: "Comprovante de habilitação no DTE",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase1", "dte"],
+      },
+      {
+        id: "fundamentos-codigos-oficiais",
+        title: "Consulta de códigos oficiais IBS/CBS",
+        description:
+          "Obter e integrar ao ERP as tabelas oficiais publicadas no Portal Nacional da NF-e (cClassTrib e cCredPres), garantindo versionamento, rastreabilidade e atualização contínua.",
+        category: "Operações",
+        severity: "laranja",
+        owner: "Tecnologia",
+        priority: "media",
+        phase: "Fundamentos",
+        pillar: "Dados & Cadastros",
+        dueInDays: 16,
+        status: "todo",
+        references: [
+          {
+            label: "Portal Nacional da NF-e - Tabelas IBS/CBS",
+            type: "guia",
+          },
+          {
+            label: "LC 214/25 - Art. 83",
+            type: "legislação",
+          },
+        ],
+        evidences: [
+          {
+            label: "Relatório de importação das tabelas",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase1", "dados"],
+      },
+    ],
+  },
+  {
+    id: "fase-implementacao-reforma-2026",
+    phase: "Implementação",
+    title: "Adaptação de Sistemas e Tecnologia",
+    summary:
+      "Assegura a adequação dos DF-e, das integrações oficiais e do split payment para operar IBS, CBS e Imposto Seletivo.",
+    milestone: "Leiaute NF-e homologado, plataformas unificadas conectadas e split payment testado",
+    focus: ["NF-e", "Split payment", "Integrações oficiais"],
+    tasks: [
+      {
+        id: "implementacao-leiaute-nfe",
+        title: "Implementação do novo leiaute da NF-e",
+        description:
+          "Adaptar sistemas e aplicativos de DF-e para o leiaute padronizado que suporta IBS, CBS e Imposto Seletivo, obrigatório para empresas do CRT 3 a partir de 05/01/2026.",
+        category: "Operações",
+        severity: "vermelho",
+        owner: "TI Fiscal",
+        priority: "alta",
+        phase: "Implementação",
+        pillar: "Tecnologia & Automação",
+        dueInDays: 20,
+        status: "todo",
+        references: [
+          {
+            label: "NT 2025.002-RTC - Leiaute NF-e",
+            type: "material",
+          },
+          {
+            label: "LC 214/25 - Art. 94",
+            type: "legislação",
+          },
+        ],
+        evidences: [
+          {
+            label: "Homologação do novo leiaute",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase2", "nfe"],
+      },
+      {
+        id: "implementacao-split-payment",
+        title: "Preparação para o split payment",
+        description:
+          "Preparar sistemas e conciliações financeiras, com PSPs e adquirentes, para segregar IBS e CBS no momento da liquidação financeira, sobretudo em operações com não contribuintes.",
+        category: "Operações",
+        severity: "laranja",
+        owner: "Equipe Financeira",
+        priority: "alta",
+        phase: "Implementação",
+        pillar: "Processos & Obrigações",
+        dueInDays: 24,
+        status: "todo",
+        references: [
+          {
+            label: "LC 214/25 - Art. 92",
+            type: "legislação",
+          },
+          {
+            label: "NT 2025.002-RTC - Orientações de split payment",
             type: "material",
           },
         ],
         evidences: [
           {
-            label: "Matriz de riscos validada",
+            label: "Plano de testes com PSP",
             status: "pendente",
           },
         ],
-        tags: ["crt3", "fundamentos", "riscos"],
+        tags: ["reforma-2026", "fase2", "split"],
+      },
+      {
+        id: "implementacao-plataformas-unificadas",
+        title: "Integração com plataformas unificadas",
+        description:
+          "Preparar autenticação, perfis de acesso e APIs para a plataforma eletrônica compartilhada entre Comitê Gestor do IBS e RFB, garantindo também o canal de suporte ao contribuinte.",
+        category: "Operações",
+        severity: "laranja",
+        owner: "Tecnologia",
+        priority: "media",
+        phase: "Implementação",
+        pillar: "Tecnologia & Automação",
+        dueInDays: 26,
+        status: "todo",
+        references: [
+          {
+            label: "LC 214/25 - Art. 95",
+            type: "legislação",
+          },
+        ],
+        evidences: [
+          {
+            label: "Checklist de integração aprovado",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase2", "plataforma"],
+      },
+      {
+        id: "implementacao-nfe-finalidades",
+        title: "Implementação das novas finalidades da NF-e",
+        description:
+          "Adequar o ERP para incluir as novas finalidades da NF-e (5 = Nota de Crédito, 6 = Nota de Débito) destinadas a ajustes de IBS/CBS, lembrando que não se aplicam a ajustes de ICMS/IPI.",
+        category: "Operações",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
+        priority: "media",
+        phase: "Implementação",
+        pillar: "Processos & Obrigações",
+        dueInDays: 28,
+        status: "todo",
+        references: [
+          {
+            label: "NT 2025.002-RTC - Finalidades NF-e",
+            type: "material",
+          },
+        ],
+        evidences: [
+          {
+            label: "Testes de emissão de notas 5 e 6",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase2", "nfe"],
+      },
+      {
+        id: "implementacao-apuracao-assistida",
+        title: "Desenvolvimento da apuração assistida",
+        description:
+          "Definir responsáveis e fluxos de validação para confirmar a apuração assistida do IBS/CBS baseada em DF-e e eventos de extinção. Destacar que a confirmação implica confissão de dívida e constituição do crédito tributário.",
+        category: "Compliance",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
+        priority: "media",
+        phase: "Implementação",
+        pillar: "Governança & Estratégia",
+        dueInDays: 32,
+        status: "todo",
+        references: [
+          {
+            label: "LC 214/25 - Art. 98",
+            type: "legislação",
+          },
+          {
+            label: "NT 2025.002-RTC - Apuração assistida",
+            type: "material",
+          },
+        ],
+        evidences: [
+          {
+            label: "Procedimento interno de validação",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase2", "apuracao"],
       },
     ],
   },
   {
-    id: "fase-planejamento",
-    phase: "Planejamento",
-    title: "Planejamento de Adequação",
-    summary: "Priorize cadastros, processos e comunicação com stakeholders.",
-    milestone: "Cadastros revisados e plano de comunicação aprovado",
-    focus: ["Cadastros", "Processos", "Comunicação"],
+    id: "fase-monitoramento-reforma-2026",
+    phase: "Monitoramento",
+    title: "Emissão e Obrigações Acessórias",
+    summary:
+      "Consolida o cumprimento das obrigações acessórias (NF-e e eventos), condição essencial para a dispensa do recolhimento em 2026.",
+    milestone: "Grupo UB completo, eventos eletrônicos ativos e créditos controlados",
+    focus: ["Grupo UB", "Eventos eletrônicos", "Gestão de créditos"],
     tasks: [
       {
-        id: "planejamento-cadastros-ncm",
-        title: "Revisar cadastros de produtos e NCM",
-        description: "Atualize códigos fiscais, exceções e benefícios conforme regras da CBS/IBS.",
+        id: "monitoramento-grupo-ub",
+        title: "Preenchimento detalhado por item (Grupo UB)",
+        description:
+          "Configurar CST e cClassTrib para cada item no Grupo UB da NF-e, validando notas piloto e assegurando vínculo com a legislação do IBS/CBS.",
         category: "Operações",
         severity: "vermelho",
         owner: "Equipe Fiscal",
         priority: "alta",
-        phase: "Planejamento",
-        pillar: "Dados & Cadastros",
-        dueInDays: 18,
-        status: "todo",
-        references: [
-          {
-            label: "Tabela NCM atualizada",
-            type: "legislação",
-            url: "https://www.gov.br/receitafederal/pt-br/assuntos/normas",
-          },
-        ],
-        evidences: [
-          {
-            label: "Relatório de divergências de cadastro",
-            status: "pendente",
-          },
-        ],
-        tags: ["crt3", "planejamento", "cadastros"],
-      },
-      {
-        id: "planejamento-relacionamento-fornecedores",
-        title: "Alinhar fornecedores críticos",
-        description: "Compartilhe mudanças de cobrança e requisitos de documentação com parceiros estratégicos.",
-        category: "Operações",
-        severity: "laranja",
-        owner: "Compras",
-        priority: "media",
-        phase: "Planejamento",
+        phase: "Monitoramento",
         pillar: "Processos & Obrigações",
-        dueInDays: 24,
-        status: "doing",
-        references: [
-          {
-            label: "Roteiro de comunicação CRT-3",
-            type: "guia",
-          },
-        ],
-        evidences: [
-          {
-            label: "Plano de comunicação aprovado",
-            status: "em revisão",
-          },
-        ],
-        tags: ["crt3", "planejamento", "fornecedores"],
-      },
-      {
-        id: "planejamento-ajuste-precificacao",
-        title: "Simular cenários de precificação",
-        description: "Modelar margens antes/depois e sugerir ajustes diplomados pela diretoria.",
-        category: "Planejamento",
-        severity: "laranja",
-        owner: "Financeiro",
-        priority: "media",
-        phase: "Planejamento",
-        pillar: "Governança & Estratégia",
-        dueInDays: 30,
-        status: "done",
-        references: [
-          {
-            label: "Template de simulação de margens",
-            type: "template",
-          },
-        ],
-        evidences: [
-          {
-            label: "Cenários aprovados",
-            status: "concluída",
-          },
-        ],
-        tags: ["crt3", "planejamento", "precificacao"],
-      },
-    ],
-  },
-  {
-    id: "fase-implementacao",
-    phase: "Implementação",
-    title: "Implementação de Sistemas e Processos",
-    summary: "Configure tecnologia e automatize obrigações operacionais.",
-    milestone: "ERP ajustado e fluxos automatizados em produção",
-    focus: ["ERP", "Automação", "Treinamentos"],
-    tasks: [
-      {
-        id: "implementacao-config-erp",
-        title: "Configurar ERP para novos tributos",
-        description: "Parametrize regras de cálculo, creditamento e relatórios fiscais.",
-        category: "Operações",
-        severity: "vermelho",
-        owner: "Tecnologia",
-        priority: "alta",
-        phase: "Implementação",
-        pillar: "Tecnologia & Automação",
         dueInDays: 35,
         status: "todo",
         references: [
           {
-            label: "Checklist técnico CRT-3",
+            label: "NT 2025.002-RTC - Grupo UB",
             type: "material",
           },
         ],
         evidences: [
           {
-            label: "Homologação do ERP",
+            label: "Relatório de notas validadas",
             status: "pendente",
           },
         ],
-        tags: ["crt3", "implementacao", "erp"],
+        tags: ["reforma-2026", "fase3", "ub"],
       },
       {
-        id: "implementacao-automacao-xml",
-        title: "Automatizar captura de XML de notas fiscais",
-        description: "Habilite integrações para entradas e saídas com alertas de divergência.",
+        id: "monitoramento-aliquotas-teste",
+        title: "Cálculo de alíquotas e base (2026)",
+        description:
+          "Aplicar as alíquotas de teste de 2026 (pCBS 0,9%, pIBSUF 0,1%, pIBSMun 0%) validando a base de cálculo (vBC) e a totalização por operação.",
         category: "Operações",
         severity: "laranja",
-        owner: "Tecnologia",
-        priority: "media",
-        phase: "Implementação",
-        pillar: "Tecnologia & Automação",
-        dueInDays: 40,
-        status: "doing",
-        references: [
-          {
-            label: "Manual técnico de integração",
-            type: "material",
-          },
-        ],
-        evidences: [
-          {
-            label: "Logs de integração validados",
-            status: "pendente",
-          },
-        ],
-        tags: ["crt3", "implementacao", "automacao"],
-      },
-      {
-        id: "implementacao-treinamento-times",
-        title: "Treinar times operacionais",
-        description: "Realize workshops sobre novos fluxos de compras, faturamento e fiscal.",
-        category: "Operações",
-        severity: "verde",
-        owner: "RH",
-        priority: "baixa",
-        phase: "Implementação",
-        pillar: "People & Change",
-        dueInDays: 45,
-        status: "done",
-        references: [
-          {
-            label: "Apresentação padrão de treinamento",
-            type: "material",
-          },
-        ],
-        evidences: [
-          {
-            label: "Lista de presença consolidada",
-            status: "concluída",
-          },
-        ],
-        tags: ["crt3", "implementacao", "treinamento"],
-      },
-    ],
-  },
-  {
-    id: "fase-monitoramento",
-    phase: "Monitoramento",
-    title: "Monitoramento e Ajustes",
-    summary: "Valide obrigações, acompanhe indicadores e reporte resultados.",
-    milestone: "Primeiro ciclo de monitoramento concluído",
-    focus: ["Obrigações", "Auditoria", "Reporting"],
-    tasks: [
-      {
-        id: "monitoramento-obrigacoes-acessorias",
-        title: "Atualizar controles de obrigações acessórias",
-        description: "Revise SPED, EFD e demais declarações impactadas pelo novo regime.",
-        category: "Compliance",
-        severity: "vermelho",
-        owner: "Compliance",
+        owner: "Equipe Financeira",
         priority: "alta",
         phase: "Monitoramento",
         pillar: "Processos & Obrigações",
-        dueInDays: 52,
+        dueInDays: 37,
         status: "todo",
         references: [
           {
-            label: "Checklist obrigações pós-reforma",
+            label: "NT 2025.002-RTC - Alíquotas de teste",
             type: "material",
           },
         ],
         evidences: [
           {
-            label: "Cronograma de entregas atualizado",
+            label: "Planilha de validação de alíquotas",
             status: "pendente",
           },
         ],
-        tags: ["crt3", "monitoramento", "compliance"],
+        tags: ["reforma-2026", "fase3", "aliquotas"],
       },
       {
-        id: "monitoramento-auditoria-piloto",
-        title: "Executar auditoria piloto de conformidade",
-        description: "Conduza auditoria interna para validar regras e apontar ajustes.",
+        id: "monitoramento-beneficios",
+        title: "Gestão de benefícios (reduções e diferimentos)",
+        description:
+          "Implementar regras para preenchimento dos grupos gRed, gDif, gDevTrib e gIBSCredPres quando aplicável, documentando todas as justificativas legais.",
         category: "Compliance",
         severity: "laranja",
-        owner: "Auditoria Interna",
+        owner: "Consultoria Tributária",
         priority: "media",
         phase: "Monitoramento",
-        pillar: "Governança & Estratégia",
-        dueInDays: 60,
-        status: "doing",
+        pillar: "Processos & Obrigações",
+        dueInDays: 39,
+        status: "todo",
         references: [
           {
-            label: "Roteiro de auditoria CRT-3",
+            label: "LC 214/25 - Arts. 82 a 89",
+            type: "legislação",
+          },
+          {
+            label: "NT 2025.002-RTC - Benefícios fiscais",
             type: "material",
           },
         ],
         evidences: [
           {
-            label: "Relatório de auditoria",
-            status: "em revisão",
+            label: "Checklist de benefícios configurados",
+            status: "pendente",
           },
         ],
-        tags: ["crt3", "monitoramento", "auditoria"],
+        tags: ["reforma-2026", "fase3", "beneficios"],
       },
       {
-        id: "monitoramento-report-executivo",
-        title: "Apresentar resultados para diretoria",
-        description: "Compartilhe indicadores de avanço, riscos e próximos passos.",
-        category: "Planejamento",
-        severity: "verde",
-        owner: "Consultoria",
-        priority: "baixa",
+        id: "monitoramento-evento-imobilizado",
+        title: "Registro de imobilização de itens (evento 211130)",
+        description:
+          "Definir gatilhos para que o destinatário registre o evento 211130 ao integrar bens ao ativo imobilizado e acompanhar os prazos de ressarcimento de créditos (Art. 40, I).",
+        category: "Compliance",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
+        priority: "media",
         phase: "Monitoramento",
-        pillar: "Governança & Estratégia",
-        dueInDays: 65,
-        status: "done",
+        pillar: "Processos & Obrigações",
+        dueInDays: 42,
+        status: "todo",
         references: [
           {
-            label: "Template de dashboard executivo",
-            type: "template",
+            label: "LC 214/25 - Art. 40, I",
+            type: "legislação",
+          },
+          {
+            label: "NT 2025.002-RTC - Evento 211130",
+            type: "material",
           },
         ],
         evidences: [
           {
-            label: "Ata de reunião executiva",
-            status: "concluída",
+            label: "Procedimento do evento 211130",
+            status: "pendente",
           },
         ],
-        tags: ["crt3", "monitoramento", "report"],
+        tags: ["reforma-2026", "fase3", "eventos"],
+      },
+      {
+        id: "monitoramento-evento-consumo",
+        title: "Registro de consumo pessoal (evento 211120)",
+        description:
+          "Garantir que aquisições destinadas a uso ou consumo emitam o evento 211120, bloqueando créditos indevidos de IBS/CBS.",
+        category: "Compliance",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
+        priority: "media",
+        phase: "Monitoramento",
+        pillar: "Processos & Obrigações",
+        dueInDays: 43,
+        status: "todo",
+        references: [
+          {
+            label: "NT 2025.002-RTC - Evento 211120",
+            type: "material",
+          },
+        ],
+        evidences: [
+          {
+            label: "Registro das operações classificadas",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase3", "eventos"],
+      },
+      {
+        id: "monitoramento-evento-pagamento",
+        title: "Informação de pagamento integral (evento 112110)",
+        description:
+          "Estabelecer rotina para o emitente informar o pagamento integral das operações via evento 112110, liberando créditos presumidos aos adquirentes.",
+        category: "Operações",
+        severity: "laranja",
+        owner: "Equipe Financeira",
+        priority: "media",
+        phase: "Monitoramento",
+        pillar: "Processos & Obrigações",
+        dueInDays: 44,
+        status: "todo",
+        references: [
+          {
+            label: "NT 2025.002-RTC - Evento 112110",
+            type: "material",
+          },
+        ],
+        evidences: [
+          {
+            label: "Relatório de eventos 112110 emitidos",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase3", "eventos"],
+      },
+      {
+        id: "monitoramento-credito-presumido",
+        title: "Uso de crédito presumido (evento 211110)",
+        description:
+          "Orientar destinatários internos sobre a solicitação de crédito presumido via evento 211110, validando o uso correto dos códigos cCredPres.",
+        category: "Compliance",
+        severity: "laranja",
+        owner: "Equipe Fiscal",
+        priority: "media",
+        phase: "Monitoramento",
+        pillar: "Processos & Obrigações",
+        dueInDays: 45,
+        status: "todo",
+        references: [
+          {
+            label: "Portal Nacional da NF-e - Código de Crédito Presumido",
+            type: "guia",
+          },
+          {
+            label: "NT 2025.002-RTC - Evento 211110",
+            type: "material",
+          },
+        ],
+        evidences: [
+          {
+            label: "Checklist de créditos presumidos aprovados",
+            status: "pendente",
+          },
+        ],
+        tags: ["reforma-2026", "fase3", "creditos"],
       },
     ],
   },
 ];
+
+const blueprintTaskIndex = new Map<string, ChecklistBlueprintTask>();
+
+function indexBlueprintTasks(blueprint: ChecklistBlueprintPhase[]) {
+  blueprint.forEach((phase) => {
+    phase.tasks.forEach((task) => {
+      blueprintTaskIndex.set(task.id, task);
+    });
+  });
+}
+
+indexBlueprintTasks(REFORMA_2026_BLUEPRINT);
+
+export function getChecklistBlueprintTask(taskId: string): ChecklistBlueprintTask | undefined {
+  return blueprintTaskIndex.get(taskId);
+}
+
+export function inferBlueprintDueDate(taskId: string, referenceDate: Date): string | undefined {
+  if (Number.isNaN(referenceDate.getTime())) {
+    return undefined;
+  }
+
+  const blueprintTask = getChecklistBlueprintTask(taskId);
+  if (!blueprintTask || typeof blueprintTask.dueInDays !== "number") {
+    return undefined;
+  }
+
+  return futureDateISO(referenceDate, blueprintTask.dueInDays);
+}
 
 function futureDateISO(referenceDate: Date, daysFromToday: number) {
   return format(addDays(referenceDate, daysFromToday), "yyyy-MM-dd");
@@ -479,10 +678,11 @@ function instantiateBlueprintTask(
   };
 }
 
-export const crt3Blueprint: ChecklistBlueprintPhase[] = CRT3_BLUEPRINT;
+export const reforma2026Blueprint: ChecklistBlueprintPhase[] = REFORMA_2026_BLUEPRINT;
+export const crt3Blueprint: ChecklistBlueprintPhase[] = REFORMA_2026_BLUEPRINT;
 
 export function instantiateChecklistBlueprint({
-  blueprint = crt3Blueprint,
+  blueprint = reforma2026Blueprint,
   checklistId,
   referenceDate = new Date(),
   timestamp,
@@ -492,6 +692,7 @@ export function instantiateChecklistBlueprint({
   referenceDate?: Date;
   timestamp?: string;
 }): ChecklistTask[] {
+  indexBlueprintTasks(blueprint);
   const baseTimestamp = timestamp ?? nowISO();
   return blueprint.flatMap((phase) =>
     phase.tasks.map((task) => instantiateBlueprintTask(task, { checklistId, referenceDate, timestamp: baseTimestamp }))
@@ -507,8 +708,8 @@ export function createDefaultChecklistBoard(companyId: string): ChecklistBoard {
   return {
     id: checklistId,
     companyId,
-    name: "Blueprint CRT-3 Essencial",
-    description: "Sequência guiada para adequação à Reforma Tributária.",
+    name: "Checklist Reforma Tributária 2026",
+    description: "Sequência guiada para adaptação do CRT 3 ao IBS/CBS com obrigatoriedades de 2026.",
     createdAt: timestamp,
     updatedAt: timestamp,
     tasks: instantiateChecklistBlueprint({ checklistId, timestamp }),

@@ -1,14 +1,7 @@
 "use client";
 
-import { use, useMemo, useState } from "react";
-import {
-  AlertTriangle,
-  Calendar as CalendarIcon,
-  KanbanSquare,
-  ListChecks,
-  Plus,
-  Trash2,
-} from "lucide-react";
+import { use, useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Calendar as CalendarIcon, KanbanSquare, ListChecks, Plus, Trash2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { Badge } from "@/components/ui/badge";
@@ -18,16 +11,24 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { ChecklistTaskCalendar } from "@/components/checklist-task-calendar";
 
 import { useAuth } from "@/context/auth-context";
 import { useCompanyPortal } from "@/hooks/use-company-portal";
-import { buildMonthlyCalendar, checklistStatuses, formatDueDateLabel, groupTasksByStatus } from "@/lib/checklist";
+import { checklistStatuses, formatDueDateLabel, groupTasksByStatus } from "@/lib/checklist";
 import { severityConfig } from "@/lib/dashboard-data";
 import { cn } from "@/lib/utils";
-import type { ChecklistBoard, ChecklistTask, ChecklistTaskStatus, NotificationSeverity } from "@/types/platform";
+import type {
+  ChecklistBoard,
+  ChecklistPhase,
+  ChecklistTask,
+  ChecklistTaskStatus,
+  NotificationSeverity,
+} from "@/types/platform";
+import type { CalendarEvent } from "@/calendar/interfaces";
+import type { EventColor } from "@/calendar/types";
 
 const statusLabels: Record<ChecklistTaskStatus, string> = {
   todo: "A fazer",
@@ -35,11 +36,42 @@ const statusLabels: Record<ChecklistTaskStatus, string> = {
   done: "Concluída",
 };
 
-const categoryOptions: ChecklistTask["category"][] = ["Planejamento", "Operações", "Compliance"];
+const PHASE_ORDER: ChecklistPhase[] = ["Fundamentos", "Planejamento", "Implementação", "Monitoramento"];
+
+const phaseDescriptions: Partial<Record<ChecklistPhase, string>> = {
+  Fundamentos:
+    "Confirma governança, regimes tributários aplicáveis e habilitações obrigatórias para operar no IBS/CBS.",
+  Planejamento:
+    "Mapeia escopo de cadastros, comunicação e cenários financeiros antes da execução (quando aplicável).",
+  Implementação:
+    "Adequa sistemas, integrações oficiais e split payment para atender o leiaute NF-e do IBS/CBS.",
+  Monitoramento:
+    "Garante obrigações acessórias (NF-e, eventos e créditos) executadas em rotina para dispensa de recolhimento.",
+};
+
+const statusBadgeStyles: Record<ChecklistTaskStatus, string> = {
+  todo: "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-500/60 dark:bg-slate-500/10 dark:text-slate-200",
+  doing: "border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-400/60 dark:bg-amber-400/10 dark:text-amber-200",
+  done: "border-emerald-300 bg-emerald-50 text-emerald-800 dark:border-emerald-400/60 dark:bg-emerald-400/10 dark:text-emerald-200",
+};
+
+const TASKS_PER_PAGE_OPTIONS = [6, 9, 12];
 
 function getSeverityBadge(severity: NotificationSeverity) {
   return severityConfig[severity] ?? severityConfig.laranja;
 }
+
+const categoryOptions: ChecklistTask["category"][] = ["Planejamento", "Operações", "Compliance"];
+
+const COLOR_TO_SEVERITY: Record<EventColor, NotificationSeverity> = {
+  red: "vermelho",
+  orange: "laranja",
+  green: "verde",
+  yellow: "laranja",
+  purple: "laranja",
+  blue: "laranja",
+  gray: "laranja",
+};
 
 function formatUpdatedAt(value?: string) {
   if (!value) return "Atualização indisponível";
@@ -122,6 +154,8 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
   const [boardForm, setBoardForm] = useState<BoardFormState>({ name: "", description: "" });
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [draggedOverStatus, setDraggedOverStatus] = useState<ChecklistTaskStatus | null>(null);
+  const [tasksPerPage, setTasksPerPage] = useState<number>(TASKS_PER_PAGE_OPTIONS[0]);
+  const [currentPage, setCurrentPage] = useState<number>(1);
 
   const riskBadge = companySeverity ?? severityConfig.laranja;
 
@@ -130,10 +164,78 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
     return groupTasksByStatus(board.tasks);
   }, [board]);
 
-  const calendarEntries = useMemo(() => {
-    if (!board) return [];
-    return buildMonthlyCalendar(board.tasks);
+  const groupedTasksByPhase = useMemo(() => {
+    if (!board) return [] as Array<{ phase: string; tasks: ChecklistTask[] }>;
+
+    const groups = board.tasks.reduce<Map<string, ChecklistTask[]>>((acc, task) => {
+      const key = task.phase ?? "Outros";
+      if (!acc.has(key)) {
+        acc.set(key, []);
+      }
+      acc.get(key)?.push(task);
+      return acc;
+    }, new Map());
+
+    const orderedPhases: Array<{ phase: string; tasks: ChecklistTask[] }> = [];
+
+    PHASE_ORDER.forEach((phase) => {
+      const items = groups.get(phase);
+      if (items?.length) {
+        orderedPhases.push({ phase, tasks: items });
+        groups.delete(phase);
+      }
+    });
+
+    groups.forEach((tasks, phase) => {
+      orderedPhases.push({ phase, tasks });
+    });
+
+    return orderedPhases;
   }, [board]);
+
+  const flattenedTasks = useMemo(
+    () =>
+      groupedTasksByPhase.flatMap(({ phase, tasks }) =>
+        tasks.map((task) => ({ phase, task }))
+      ),
+    [groupedTasksByPhase]
+  );
+
+  const totalTasks = flattenedTasks.length;
+  const totalPages = totalTasks ? Math.ceil(totalTasks / tasksPerPage) : 1;
+  const effectiveCurrentPage = Math.min(currentPage, totalPages);
+  const startIndex = totalTasks ? (effectiveCurrentPage - 1) * tasksPerPage : 0;
+  const endIndex = startIndex + tasksPerPage;
+  const currentItems = flattenedTasks.slice(startIndex, endIndex);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [tasksPerPage, board?.id]);
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [currentPage, totalPages]);
+
+  const paginatedPhases = useMemo(() => {
+    if (!currentItems.length) return [] as Array<{ phase: string; tasks: ChecklistTask[] }>;
+    const map = new Map<string, ChecklistTask[]>();
+    currentItems.forEach(({ phase, task }) => {
+      if (!map.has(phase)) {
+        map.set(phase, []);
+      }
+      map.get(phase)!.push(task);
+    });
+
+    return groupedTasksByPhase
+      .filter(({ phase }) => map.has(phase))
+      .map(({ phase }) => ({ phase, tasks: map.get(phase)! }));
+  }, [currentItems, groupedTasksByPhase]);
+
+  const pageRangeStart = totalTasks ? startIndex + 1 : 0;
+  const pageRangeEnd = totalTasks ? startIndex + currentItems.length : 0;
+  const pageNumbers = useMemo(() => Array.from({ length: totalPages }, (_, index) => index + 1), [totalPages]);
 
   if (loading || !user) {
     return (
@@ -272,6 +374,45 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
     handleStatusChange(draggedTaskId, status);
   };
 
+  const mapEventToSeverity = (event: CalendarEvent): NotificationSeverity => {
+    return COLOR_TO_SEVERITY[event.color] ?? "laranja";
+  };
+
+  const handleCalendarCreate = async (event: CalendarEvent) => {
+    if (!company) return;
+    const severity = mapEventToSeverity(event);
+    const owner = event.user?.name?.trim() || "Equipe";
+
+    createChecklistTask(company.id, board.id, {
+      title: event.title.trim() || "Tarefa sem título",
+      description: event.description?.trim() || undefined,
+      owner,
+      severity,
+      category: "Planejamento",
+      dueDate: event.startDate,
+      status: "todo",
+    });
+  };
+
+  const handleCalendarUpdate = async (event: CalendarEvent) => {
+    if (!company) return;
+    const severity = mapEventToSeverity(event);
+    const owner = event.user?.name?.trim() || "Equipe";
+
+    updateChecklistTask(company.id, board.id, event.id, {
+      title: event.title?.trim() || undefined,
+      description: event.description?.trim() || undefined,
+      owner,
+      severity,
+      dueDate: event.startDate,
+    });
+  };
+
+  const handleCalendarDelete = async (event: CalendarEvent) => {
+    if (!company) return;
+    deleteChecklistTask(company.id, board.id, event.id);
+  };
+
   return (
     <div className="space-y-8 pb-16">
       <header className="space-y-4">
@@ -334,90 +475,181 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
             </TabsList>
 
             <TabsContent value="lista" className="space-y-4">
-              <div className="overflow-x-auto rounded-md border">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-[36%]">Tarefa</TableHead>
-                      <TableHead>Pilar</TableHead>
-                      <TableHead>Responsável</TableHead>
-                      <TableHead>Prazo</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead className="text-right">Ações</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {board.tasks.length ? (
-                      board.tasks.map((task) => (
-                        <TableRow key={task.id} className="border-muted/40">
-                          <TableCell>
-                            <div className="space-y-2">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="text-sm font-medium text-foreground">{task.title}</p>
+              {board.tasks.length ? (
+                <div className="space-y-6">
+                  <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-muted/40 bg-muted/10 px-4 py-3">
+                    <div className="space-y-1 text-xs text-muted-foreground">
+                      <p className="font-medium text-foreground">
+                        Tarefas
+                      </p>
+                      <p>
+                        Mostrando {pageRangeStart}-{pageRangeEnd} de {totalTasks} tarefas
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Páginas</span>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setCurrentPage((prev) => Math.max(prev - 1, 1))}
+                            disabled={effectiveCurrentPage === 1}
+                            aria-label="Página anterior"
+                          >
+                            ←
+                          </Button>
+                          {pageNumbers.map((page) => (
+                            <Button
+                              key={page}
+                              size="sm"
+                              variant={page === effectiveCurrentPage ? "default" : "outline"}
+                              className="h-8 w-8 p-0"
+                              onClick={() => setCurrentPage(page)}
+                              aria-label={`Ir para página ${page}`}
+                            >
+                              {page}
+                            </Button>
+                          ))}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 w-8 p-0"
+                            onClick={() => setCurrentPage((prev) => Math.min(prev + 1, totalPages))}
+                            disabled={effectiveCurrentPage === totalPages}
+                            aria-label="Próxima página"
+                          >
+                            →
+                          </Button>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>Por página</span>
+                        <Select
+                          value={String(tasksPerPage)}
+                          onValueChange={(value) => setTasksPerPage(Number(value))}
+                        >
+                          <SelectTrigger className="h-8 w-24 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {TASKS_PER_PAGE_OPTIONS.map((option) => (
+                              <SelectItem key={option} value={String(option)}>
+                                {option}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {paginatedPhases.map(({ phase, tasks }) => {
+                    const phaseDescription = phaseDescriptions[phase as ChecklistPhase];
+                    return (
+                      <div key={phase} className="space-y-3 rounded-lg border border-muted/40 bg-muted/10 p-4">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="space-y-1">
+                            <h3 className="text-sm font-semibold uppercase text-foreground">{phase}</h3>
+                            {phaseDescription ? (
+                              <p className="text-xs text-muted-foreground max-w-3xl">{phaseDescription}</p>
+                            ) : null}
+                          </div>
+                          <Badge variant="outline" className="text-[10px] uppercase">
+                            {tasks.length} tarefa(s)
+                          </Badge>
+                        </div>
+                        <div className="space-y-3">
+                          {tasks.map((task) => (
+                            <div
+                              key={task.id}
+                              className="space-y-3 rounded-md border border-muted/50 bg-background/80 p-4 shadow-sm"
+                            >
+                              <div className="flex flex-wrap items-start justify-between gap-3">
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <p className="text-sm font-semibold text-foreground">{task.title}</p>
+                                    <Badge
+                                      variant="outline"
+                                      className={cn("text-[10px] uppercase", getSeverityBadge(task.severity).badge)}
+                                    >
+                                      {task.severity}
+                                    </Badge>
+                                  </div>
+                                  {task.description ? (
+                                    <p className="text-xs text-muted-foreground max-w-3xl">{task.description}</p>
+                                  ) : null}
+                                </div>
                                 <Badge
                                   variant="outline"
-                                  className={cn("uppercase text-[10px]", getSeverityBadge(task.severity).badge)}
+                                  className={cn("text-[10px] uppercase", statusBadgeStyles[task.status])}
                                 >
-                                  {task.severity}
+                                  {statusLabels[task.status]}
                                 </Badge>
                               </div>
-                              {task.description ? (
-                                <p className="text-xs text-muted-foreground">{task.description}</p>
-                              ) : null}
+                              <dl className="grid gap-2 text-[11px] text-muted-foreground sm:grid-cols-2 lg:grid-cols-3">
+                                <div className="flex items-start gap-2">
+                                  <span className="font-medium text-foreground">Responsável</span>
+                                  <span>{task.owner}</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <span className="font-medium text-foreground">Pilar</span>
+                                  <span>{task.pillar ?? "—"}</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <span className="font-medium text-foreground">Prazo</span>
+                                  <span>{formatDueDateLabel(task.dueDate)}</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <span className="font-medium text-foreground">Categoria</span>
+                                  <span>{task.category}</span>
+                                </div>
+                                <div className="flex items-start gap-2">
+                                  <span className="font-medium text-foreground">Tags</span>
+                                  <span>{task.tags?.length ? task.tags.join(", ") : "—"}</span>
+                                </div>
+                              </dl>
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <Select
+                                  value={task.status}
+                                  onValueChange={(value) => handleStatusChange(task.id, value as ChecklistTaskStatus)}
+                                >
+                                  <SelectTrigger className="h-8 w-36 text-xs capitalize">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {checklistStatuses.map((status) => (
+                                      <SelectItem key={status} value={status} className="capitalize">
+                                        {statusLabels[status]}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                <Button size="sm" className="text-xs" onClick={() => handleOpenEditTask(task)}>
+                                  Editar
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="text-xs text-destructive"
+                                  onClick={() => handleDeleteTask(task.id)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </div>
-                          </TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{task.category}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{task.owner}</TableCell>
-                          <TableCell className="text-xs text-muted-foreground">{formatDueDateLabel(task.dueDate)}</TableCell>
-                          <TableCell>
-                            <Select
-                              value={task.status}
-                              onValueChange={(value) => handleStatusChange(task.id, value as ChecklistTaskStatus)}
-                            >
-                              <SelectTrigger className="h-8 text-xs capitalize">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {checklistStatuses.map((status) => (
-                                  <SelectItem key={status} value={status} className="capitalize">
-                                    {statusLabels[status]}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </TableCell>
-                          <TableCell>
-                            <div className="flex items-center justify-end gap-2">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs"
-                                onClick={() => handleOpenEditTask(task)}
-                              >
-                                Editar
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="text-xs text-destructive"
-                                onClick={() => handleDeleteTask(task.id)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : (
-                      <TableRow>
-                        <TableCell colSpan={6} className="py-10 text-center text-sm text-muted-foreground">
-                          Nenhuma tarefa cadastrada ainda. Crie a primeira para iniciar o plano.
-                        </TableCell>
-                      </TableRow>
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded-lg border border-dashed border-primary/30 bg-muted/30 p-10 text-center text-sm text-muted-foreground">
+                  Nenhuma tarefa cadastrada ainda. Crie a primeira para iniciar o plano.
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="kanban">
@@ -479,21 +711,15 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
                             <p className="text-xs text-muted-foreground">Responsável: {task.owner}</p>
                             <p className="text-xs text-muted-foreground">Prazo: {formatDueDateLabel(task.dueDate)}</p>
                             <div className="mt-3 flex items-center justify-between gap-2">
-                              <Select
-                                value={task.status}
-                                onValueChange={(value) => handleStatusChange(task.id, value as ChecklistTaskStatus)}
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] uppercase",
+                                  statusBadgeStyles[task.status]
+                                )}
                               >
-                                <SelectTrigger className="h-8 w-[140px] text-xs capitalize">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {checklistStatuses.map((candidate) => (
-                                    <SelectItem key={candidate} value={candidate} className="capitalize">
-                                      {statusLabels[candidate]}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
+                                {statusLabels[task.status]}
+                              </Badge>
                               <div className="flex items-center gap-2">
                                 <Button
                                   variant="ghost"
@@ -524,37 +750,24 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
               </div>
             </TabsContent>
 
-            <TabsContent value="calendario">
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-7">
-                {calendarEntries.map((entry) => (
-                  <div key={entry.date} className="rounded-lg border bg-background p-3 text-xs">
-                    <div className="flex items-center justify-between text-[11px] font-medium uppercase text-muted-foreground">
-                      <span>
-                        {new Date(entry.date).toLocaleDateString("pt-BR", { day: "2-digit", month: "short" })}
-                      </span>
-                      <Badge variant="outline" className="text-[10px]">
-                        {entry.tasks.length}
-                      </Badge>
-                    </div>
-                    <div className="mt-2 space-y-2">
-                      {entry.tasks.length ? (
-                        entry.tasks.slice(0, 3).map((task) => (
-                          <div key={task.id} className="rounded border border-primary/20 bg-primary/5 p-2">
-                            <p className="text-xs font-medium text-foreground">{task.title}</p>
-                            <p className="text-[11px] text-muted-foreground">
-                              {statusLabels[task.status]} • {task.owner}
-                            </p>
-                          </div>
-                        ))
-                      ) : (
-                        <p className="text-[11px] text-muted-foreground">Sem tarefas</p>
-                      )}
-                      {entry.tasks.length > 3 ? (
-                        <p className="text-[11px] text-muted-foreground">+{entry.tasks.length - 3} tarefa(s)</p>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
+            <TabsContent value="calendario" className="space-y-4">
+              <ChecklistTaskCalendar
+                tasks={board.tasks}
+                onCreateEvent={handleCalendarCreate}
+                onUpdateEvent={handleCalendarUpdate}
+                onDeleteEvent={handleCalendarDelete}
+              />
+              <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+                <span className="font-medium text-foreground">Legenda</span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-[#f97066]/60 bg-[#2d1519]/70 px-2 py-0.5 text-[10px] uppercase text-[#f97066]">
+                  Crítico
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-[#f6c445]/60 bg-[#2b1e0b]/70 px-2 py-0.5 text-[10px] uppercase text-[#f6c445]">
+                  Atenção
+                </span>
+                <span className="inline-flex items-center gap-2 rounded-full border border-[#1cbf93]/60 bg-[#0f2d22]/70 px-2 py-0.5 text-[10px] uppercase text-[#63e2b4]">
+                  Monitorar
+                </span>
               </div>
             </TabsContent>
           </Tabs>
