@@ -433,7 +433,6 @@ export function toSupabaseTaskInsert(
 ): Database["public"]["Tables"]["checklist_tasks"]["Insert"] {
   return {
     id: task.id,
-    blueprint_id: task.blueprintId ?? null,
     board_id: task.checklistId,
     title: task.title,
     description: task.description,

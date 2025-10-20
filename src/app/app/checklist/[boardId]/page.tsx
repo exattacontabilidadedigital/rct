@@ -258,10 +258,13 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [draggedOverStatus, setDraggedOverStatus] = useState<ChecklistTaskStatus | null>(null);
 
-  const historyTask =
-    taskDialog.open && taskDialog.task
-      ? board?.tasks.find((candidate) => candidate.id === taskDialog.task.id) ?? taskDialog.task
-      : null;
+  const isTaskDialogEditing = taskDialog.open && taskDialog.mode === "edit";
+
+  const activeDialogTask = isTaskDialogEditing && taskDialog.task ? taskDialog.task : null;
+
+  const historyTask = activeDialogTask
+    ? board?.tasks.find((candidate) => candidate.id === activeDialogTask.id) ?? activeDialogTask
+    : null;
 
   const sortedTaskHistory = useMemo<ChecklistTaskAuditEntry[]>(() => {
     if (!historyTask?.history?.length) {
@@ -557,6 +560,8 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
   const handleTaskSubmit = () => {
     if (!company || !taskDialog.open) return;
 
+    const { mode, task: dialogTask } = taskDialog;
+
     const payload = {
       title: taskForm.title.trim() || "Tarefa sem título",
       description: taskForm.description.trim(),
@@ -578,10 +583,10 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
       delete (payload as { tags?: string[] }).tags;
     }
 
-    if (taskDialog.mode === "create") {
+    if (mode === "create") {
       createChecklistTask(company.id, board.id, payload);
-    } else if (taskDialog.task) {
-      updateChecklistTask(company.id, board.id, taskDialog.task.id, payload);
+    } else if (dialogTask) {
+      updateChecklistTask(company.id, board.id, dialogTask.id, payload);
     }
 
     closeTaskDialog();
@@ -1138,7 +1143,7 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
         <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>
-              {taskDialog.open && taskDialog.mode === "edit" ? "Editar tarefa" : "Nova tarefa"}
+              {isTaskDialogEditing ? "Editar tarefa" : "Nova tarefa"}
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4 py-2">
@@ -1336,7 +1341,7 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
               />
             </div>
 
-            {taskDialog.mode === "edit" && historyTask ? (
+            {isTaskDialogEditing && historyTask ? (
               <div className="space-y-3 rounded-md border border-muted/40 bg-muted/10 p-3">
                 <div className="flex items-center justify-between gap-2">
                   <h4 className="text-sm font-semibold text-foreground">Histórico de alterações</h4>
@@ -1399,7 +1404,7 @@ export default function ChecklistBoardPage({ params }: { params: Promise<{ board
               Cancelar
             </Button>
             <Button onClick={handleTaskSubmit}>
-              {taskDialog.open && taskDialog.mode === "edit" ? "Salvar alterações" : "Adicionar tarefa"}
+              {isTaskDialogEditing ? "Salvar alterações" : "Adicionar tarefa"}
             </Button>
           </DialogFooter>
         </DialogContent>

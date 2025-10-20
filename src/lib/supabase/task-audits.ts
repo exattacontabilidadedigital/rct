@@ -117,13 +117,39 @@ export async function insertSupabaseTaskAudit(
     updated_at: nowISO(),
   };
 
-  const { error } = await client.from("checklist_task_audits").insert(payload);
-  if (error) {
-    if (isTaskAuditTableMissingError(error)) {
+  const submit = async (insertPayload: TaskAuditInsert) =>
+    client
+      .from("checklist_task_audits")
+      .upsert(insertPayload, { onConflict: "id", ignoreDuplicates: true });
+
+  const { error } = await submit(payload);
+  if (!error) {
+    return;
+  }
+
+  if (error.code === "23503" && typeof error.message === "string" && error.message.includes("checklist_task_audits_actor_id_fkey")) {
+    const fallbackPayload: TaskAuditInsert = {
+      ...payload,
+      actor_id: null,
+    };
+
+    const { error: fallbackError } = await submit(fallbackPayload);
+    if (!fallbackError) {
       return;
     }
-    throw error;
+
+    if (isTaskAuditTableMissingError(fallbackError)) {
+      return;
+    }
+
+    throw fallbackError;
   }
+
+  if (isTaskAuditTableMissingError(error)) {
+    return;
+  }
+
+  throw error;
 }
 
 export function groupTaskAuditsByTask(

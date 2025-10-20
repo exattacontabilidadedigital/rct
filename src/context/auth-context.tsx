@@ -1331,9 +1331,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     actor: PublicUser | null,
     timestamp: string
   ): ChecklistTaskAuditEntry {
-    const actorId = actor?.id ?? null;
-    const actorName = actor?.name ?? "Sistema";
-    const actorRole = actor?.role ?? null;
+  const actorName = actor?.name ?? "Sistema";
+  const actorRole = actor?.role ?? null;
 
     const changeSet: ChecklistTaskChangeSet = {
       status: { from: null, to: task.status },
@@ -1366,7 +1365,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       event: "created",
       summary: `“${task.title}” foi criada no checklist “${board.name}” por ${actorName}.`,
       changes: changeSet,
-      actorId,
+  actorId: null,
       actorName,
       actorRole,
       createdAt: timestamp,
@@ -1394,7 +1393,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       event: details.event,
       summary: details.summary,
       changes: details.changeSet,
-      actorId: actor?.id ?? null,
+  actorId: null,
       actorName: actor?.name ?? "Sistema",
       actorRole: actor?.role ?? null,
       createdAt: timestamp,
