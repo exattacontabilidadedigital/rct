@@ -1,33 +1,68 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState } from "react";
-import { parseISO } from "date-fns";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import type { RealtimeChannel, Session } from "@supabase/supabase-js";
 
 import {
   buildChecklistNotifications,
   calculateChecklistProgressFromBoards,
-  checklistStatuses,
   createDefaultChecklistBoard,
-  inferBlueprintDueDate,
+  createChecklistEventNotification,
+  formatDueDateLabel,
   instantiateChecklistBlueprint,
 } from "@/lib/checklist";
+import { generateUuid } from "@/lib/id";
+import {
+  INITIAL_STATE as DEMO_INITIAL_STATE,
+} from "@/data/demo";
+import {
+  nowISO,
+  sanitizeBoard,
+  sanitizeCategory,
+  sanitizeEvidences,
+  sanitizeTask,
+  sanitizeNotes,
+  sanitizePhase,
+  sanitizePillar,
+  sanitizePriority,
+  sanitizeReferences,
+  sanitizeSeverity,
+  sanitizeStatus,
+  sanitizeTags,
+  toSupabaseJson,
+  toSupabaseTaskInsert,
+} from "@/lib/checklist-normalizers";
+import type { Database } from "@/lib/supabase/types";
+import { getSupabaseBrowserClient } from "@/lib/supabase/browser";
+import { fetchSupabaseCompanyBoards, insertSupabaseBoardWithTasks } from "@/lib/supabase/checklists";
+import {
+  fetchSupabaseChecklistNotifications,
+  setSupabaseNotificationRead,
+  setSupabaseNotificationsAllRead,
+  syncSupabaseChecklistNotifications,
+} from "@/lib/supabase/notifications";
+import {
+  fetchSupabaseTaskAudits,
+  groupTaskAuditsByTask,
+  insertSupabaseTaskAudit,
+  isTaskAuditTableMissingError,
+} from "@/lib/supabase/task-audits";
 import type {
   ChecklistBoard,
   ChecklistNotification,
+  ChecklistTaskAuditEntry,
+  ChecklistTaskAuditEvent,
+  ChecklistTaskChangeSet,
   ChecklistTask,
   ChecklistTaskStatus,
-  ChecklistPhase,
-  ChecklistPillar,
-  ChecklistPriority,
-  ChecklistTaskEvidence,
-  ChecklistTaskNote,
-  ChecklistTaskReference,
   Company,
   NotificationSeverity,
   SessionState,
   User,
   UserRole,
 } from "@/types/platform";
+
+const loggedCompaniesWithoutSession = new Set<string>();
 
 type PublicUser = Omit<User, "password">;
 
@@ -68,7 +103,13 @@ interface AuthContextValue {
   user: User | null;
   companies: Company[];
   loading: boolean;
-  login: (params: { email: string; password: string }) => Promise<{ success: boolean; message?: string }>;
+  login: (
+    params: { email: string; password: string },
+  ) => Promise<{
+    success: boolean;
+    message?: string;
+    code?: "invalid-credentials" | "network-error" | "unknown-error";
+  }>;
   logout: () => void;
   registerCompany: (params: {
     name: string;
@@ -144,239 +185,71 @@ type LegacyCompany = Partial<Company> & {
   notifications?: ChecklistNotification[];
 };
 
-const STORAGE_KEY = "rtc-auth-state-v1";
-const VALID_SEVERITIES: NotificationSeverity[] = ["verde", "laranja", "vermelho"];
-const VALID_CATEGORIES: ChecklistTask["category"][] = ["Planejamento", "Operações", "Compliance"];
-const VALID_PRIORITIES: ChecklistPriority[] = ["alta", "media", "baixa"];
-const VALID_PHASES: ChecklistPhase[] = ["Fundamentos", "Planejamento", "Implementação", "Monitoramento"];
-const VALID_PILLARS: ChecklistPillar[] = [
-  "Governança & Estratégia",
-  "Dados & Cadastros",
-  "Processos & Obrigações",
-  "Tecnologia & Automação",
-  "People & Change",
-];
-const VALID_REFERENCE_TYPES: ChecklistTaskReference["type"][] = ["legislação", "guia", "material", "template"];
-const VALID_EVIDENCE_STATUS: NonNullable<ChecklistTaskEvidence["status"]>[] = [
-  "pendente",
-  "em revisão",
-  "concluída",
-];
+const STORAGE_KEY = "rtc-auth-state-v2";
+function toSupabaseTaskUpdatePayload(updates: ChecklistTaskUpdate | { status: ChecklistTaskStatus }) {
+  const payload: Record<string, unknown> = {
+    updated_at: nowISO(),
+  };
 
-function nowISO() {
-  return new Date().toISOString();
-}
-
-function generateId(prefix: string) {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return `${prefix}-${crypto.randomUUID()}`;
-  }
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
-}
-
-function sanitizeStatus(value: unknown): ChecklistTaskStatus {
-  return checklistStatuses.includes(value as ChecklistTaskStatus) ? (value as ChecklistTaskStatus) : "todo";
-}
-
-function sanitizeSeverity(value: unknown): NotificationSeverity {
-  return VALID_SEVERITIES.includes(value as NotificationSeverity)
-    ? (value as NotificationSeverity)
-    : "laranja";
-}
-
-function sanitizeCategory(value: unknown): ChecklistTask["category"] {
-  return VALID_CATEGORIES.includes(value as ChecklistTask["category"])
-    ? (value as ChecklistTask["category"])
-    : "Planejamento";
-}
-
-function sanitizePriority(value: unknown): ChecklistPriority {
-  return VALID_PRIORITIES.includes(value as ChecklistPriority) ? (value as ChecklistPriority) : "media";
-}
-
-function sanitizePhase(value: unknown): ChecklistPhase | undefined {
-  return VALID_PHASES.includes(value as ChecklistPhase) ? (value as ChecklistPhase) : undefined;
-}
-
-function sanitizePillar(value: unknown): ChecklistPillar | undefined {
-  return VALID_PILLARS.includes(value as ChecklistPillar) ? (value as ChecklistPillar) : undefined;
-}
-
-function sanitizeReferences(value: unknown): ChecklistTaskReference[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((candidate) => {
-      if (!candidate || typeof candidate !== "object") return null;
-      const label = "label" in candidate && typeof candidate.label === "string" ? candidate.label.trim() : "";
-      if (!label) return null;
-
-      const reference: ChecklistTaskReference = {
-        label,
-      };
-
-      if ("description" in candidate && typeof candidate.description === "string") {
-        const description = candidate.description.trim();
-        if (description) reference.description = description;
-      }
-
-      if ("url" in candidate && typeof candidate.url === "string") {
-        const url = candidate.url.trim();
-        if (url) reference.url = url;
-      }
-
-      if ("type" in candidate && typeof candidate.type === "string") {
-        const type = candidate.type.trim() as ChecklistTaskReference["type"];
-        if (VALID_REFERENCE_TYPES.includes(type)) {
-          reference.type = type;
-        }
-      }
-
-      return reference;
-    })
-    .filter((reference): reference is ChecklistTaskReference => Boolean(reference));
-}
-
-function sanitizeEvidences(value: unknown): ChecklistTaskEvidence[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((candidate) => {
-      if (!candidate || typeof candidate !== "object") return null;
-      const label = "label" in candidate && typeof candidate.label === "string" ? candidate.label.trim() : "";
-      if (!label) return null;
-
-      const evidence: ChecklistTaskEvidence = {
-        label,
-      };
-
-      if ("description" in candidate && typeof candidate.description === "string") {
-        const description = candidate.description.trim();
-        if (description) evidence.description = description;
-      }
-
-      if ("url" in candidate && typeof candidate.url === "string") {
-        const url = candidate.url.trim();
-        if (url) evidence.url = url;
-      }
-
-      if ("status" in candidate && typeof candidate.status === "string") {
-        const status = candidate.status.trim() as ChecklistTaskEvidence["status"];
-        if (VALID_EVIDENCE_STATUS.includes(status as NonNullable<ChecklistTaskEvidence["status"]>)) {
-          evidence.status = status;
-        }
-      }
-
-      return evidence;
-    })
-    .filter((evidence): evidence is ChecklistTaskEvidence => Boolean(evidence));
-}
-
-function sanitizeNotes(value: unknown): ChecklistTaskNote[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((candidate) => {
-      if (!candidate || typeof candidate !== "object") return null;
-
-      const content = "content" in candidate && typeof candidate.content === "string" ? candidate.content.trim() : "";
-      if (!content) return null;
-
-      const author =
-        "author" in candidate && typeof candidate.author === "string" && candidate.author.trim()
-          ? candidate.author.trim()
-          : "Equipe";
-
-      const createdAt =
-        "createdAt" in candidate && typeof candidate.createdAt === "string" && candidate.createdAt.trim()
-          ? candidate.createdAt
-          : nowISO();
-
-      const id =
-        "id" in candidate && typeof candidate.id === "string" && candidate.id.trim()
-          ? candidate.id
-          : generateId("note");
-
-      const note: ChecklistTaskNote = {
-        id,
-        author,
-        content,
-        createdAt,
-      };
-
-      return note;
-    })
-    .filter((note): note is ChecklistTaskNote => Boolean(note));
-}
-
-function sanitizeTags(value: unknown): string[] {
-  if (!Array.isArray(value)) return [];
-  return value
-    .map((candidate) => (typeof candidate === "string" ? candidate.trim() : ""))
-    .filter((tag): tag is string => Boolean(tag));
-}
-
-function sanitizeTask(
-  task: Partial<ChecklistTask>,
-  boardId: string,
-  fallbackTimestamp: string
-): ChecklistTask {
-  const createdAt = task.createdAt ?? fallbackTimestamp;
-  const updatedAt = task.updatedAt ?? createdAt;
-  const rawDueDate = typeof task.dueDate === "string" ? task.dueDate.trim() : task.dueDate;
-  const hasManualUpdates = Boolean(task.updatedAt) && task.updatedAt !== task.createdAt;
-
-  let dueDate = rawDueDate && rawDueDate.length ? rawDueDate : undefined;
-
-  if (!dueDate && task.id) {
-    const referenceDate = parseISO(createdAt);
-    const inferred = inferBlueprintDueDate(task.id, referenceDate);
-    if (inferred && !hasManualUpdates) {
-      dueDate = inferred;
-    }
+  if ("title" in updates && updates.title !== undefined) {
+    payload.title = updates.title;
   }
 
-  return {
-    id: task.id ?? generateId("task"),
-    checklistId: boardId,
-    title: task.title ?? "Tarefa sem título",
-    description: task.description ?? "",
-    severity: sanitizeSeverity(task.severity),
-    status: sanitizeStatus(task.status),
-    owner: task.owner ?? "Equipe",
-    category: sanitizeCategory(task.category),
-  dueDate,
-    phase: sanitizePhase(task.phase),
-    pillar: sanitizePillar(task.pillar),
-    priority: sanitizePriority(task.priority),
-    references: sanitizeReferences(task.references),
-    evidences: sanitizeEvidences(task.evidences),
-    notes: sanitizeNotes(task.notes),
-    tags: sanitizeTags(task.tags),
-    createdAt,
-    updatedAt,
-  };
-}
+  if ("description" in updates && updates.description !== undefined) {
+    payload.description = updates.description ?? "";
+  }
 
-function sanitizeBoard(board: Partial<ChecklistBoard>, companyId: string): ChecklistBoard {
-  const reference = board.createdAt ?? nowISO();
-  const boardId = board.id ?? generateId("checklist");
-  const createdAt = board.createdAt ?? reference;
-  const updatedAt = board.updatedAt ?? createdAt;
+  if ("severity" in updates && updates.severity !== undefined) {
+    payload.severity = sanitizeSeverity(updates.severity);
+  }
 
-  const tasks = Array.isArray(board.tasks)
-    ? board.tasks.map((task) => sanitizeTask(task, boardId, createdAt))
-    : [];
+  if ("status" in updates && updates.status !== undefined) {
+    payload.status = sanitizeStatus(updates.status);
+  }
 
-  return {
-    id: boardId,
-    companyId: board.companyId ?? companyId,
-    name: board.name ?? "Checklist",
-    description: board.description,
-    createdAt,
-    updatedAt,
-    tasks,
-  };
+  if ("owner" in updates && updates.owner !== undefined) {
+    payload.owner = updates.owner;
+  }
+
+  if ("category" in updates && updates.category !== undefined) {
+    payload.category = sanitizeCategory(updates.category);
+  }
+
+  if ("dueDate" in updates && updates.dueDate !== undefined) {
+    payload.due_date = updates.dueDate ?? null;
+  }
+
+  if ("phase" in updates) {
+    const phase = updates.phase !== undefined ? sanitizePhase(updates.phase) ?? null : null;
+    payload.phase = phase;
+  }
+
+  if ("pillar" in updates) {
+    const pillar = updates.pillar !== undefined ? sanitizePillar(updates.pillar) ?? null : null;
+    payload.pillar = pillar;
+  }
+
+  if ("priority" in updates && updates.priority !== undefined) {
+    payload.priority = sanitizePriority(updates.priority);
+  }
+
+  if ("references" in updates) {
+    payload.reference_items = toSupabaseJson(updates.references ?? null);
+  }
+
+  if ("evidences" in updates) {
+    payload.evidence_items = toSupabaseJson(updates.evidences ?? null);
+  }
+
+  if ("notes" in updates) {
+    payload.note_items = toSupabaseJson(updates.notes ?? null);
+  }
+
+  if ("tags" in updates) {
+    payload.tags = updates.tags ?? null;
+  }
+
+  return payload;
 }
 
 function convertLegacyChecklist(companyId: string, legacy: LegacyChecklist): ChecklistBoard {
@@ -384,19 +257,26 @@ function convertLegacyChecklist(companyId: string, legacy: LegacyChecklist): Che
   const boardId = `${companyId}-checklist-essencial`;
   const completed = new Set(legacy.completedItems ?? []);
 
-  const tasks = (legacy.items ?? []).map((item) => ({
-    id: item.id ?? generateId("task"),
-    checklistId: boardId,
-    title: item.title ?? "Item sem título",
-    description: item.description ?? "",
-    severity: sanitizeSeverity(item.severity),
-    status: sanitizeStatus(completed.has(item.id ?? "") ? "done" : "todo"),
-    owner: item.owner ?? "Equipe",
-    category: sanitizeCategory(item.category),
-    dueDate: item.dueDate,
-    createdAt: timestamp,
-    updatedAt: timestamp,
-  }));
+  const tasks = (legacy.items ?? []).map((item) =>
+    sanitizeTask(
+      {
+        id: generateUuid(),
+        blueprintId: item.id,
+        checklistId: boardId,
+        title: item.title ?? "Item sem título",
+        description: item.description ?? "",
+        severity: sanitizeSeverity(item.severity),
+        status: sanitizeStatus(completed.has(item.id ?? "") ? "done" : "todo"),
+        owner: item.owner ?? "Equipe",
+        category: sanitizeCategory(item.category),
+        dueDate: item.dueDate,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      },
+      boardId,
+      timestamp
+    )
+  );
 
   return {
     id: boardId,
@@ -424,7 +304,7 @@ function extractBoards(companyId: string, company: LegacyCompany): ChecklistBoar
 
 function normalizeCompanies(companies: LegacyCompany[]): Company[] {
   return companies.map((raw) => {
-    const companyId = raw.id ?? generateId("company");
+    const companyId = raw.id ?? generateUuid();
     const boards = extractBoards(companyId, raw);
     const notifications = buildChecklistNotifications(boards, raw.notifications);
 
@@ -462,58 +342,185 @@ function recalculateCompany(
   };
 }
 
-const demoBoard = createDefaultChecklistBoard("empresa-demo");
-const demoCompany: Company = {
-  id: "empresa-demo",
-  name: "Mercado Luz",
-  ownerId: "empresa-demo",
-  regime: "Simples Nacional",
-  sector: "Varejo Alimentício",
-  cnpj: "12.345.678/0001-99",
-  origin: "Indicação",
-  maturity: "Em adaptação",
-  riskLevel: "laranja",
-  checklistProgress: calculateChecklistProgressFromBoards([demoBoard]),
-  employees: ["colaborador-demo"],
-  accountantIds: [],
-  metadata: {
-    revenueRange: "3-10mi",
-    employeeSize: "21-50",
-    mainGoal: "Rever precificação com a CBS",
-    mainChallenge: "Centralizar obrigações acessórias em um só lugar",
-  },
-  checklists: [demoBoard],
-  notifications: buildChecklistNotifications([demoBoard]),
-};
+function buildChecklistBoard(companyId: string, payload: ChecklistBoardPayload): ChecklistBoard {
+  const timestamp = nowISO();
+  const boardId = generateUuid();
+  const useTemplate = payload.template !== "blank";
 
-const INITIAL_STATE: StoredState = {
-  users: [
-    {
-      id: "empresa-demo",
-      name: "Mercado Luz",
-      email: "empresa@rtc.com",
-      password: "demo123",
-      role: "empresa",
-    },
-    {
-      id: "colaborador-demo",
-      name: "Ana Ribeiro",
-      email: "colaborador@rtc.com",
-      password: "demo123",
-      role: "colaborador",
-      companyId: "empresa-demo",
-    },
-    {
-      id: "contador-demo",
-      name: "Clínica Contábil",
-      email: "contador@rtc.com",
-      password: "demo123",
-      role: "contador",
-    },
-  ],
-  companies: [demoCompany],
-  session: null,
-};
+  const baseName = payload.template === "essencial" ? "Checklist Reforma Tributária 2026" : "Checklist";
+
+  const board: ChecklistBoard = {
+    id: boardId,
+    companyId,
+    name: payload.name?.trim() || baseName,
+    description: payload.description?.trim() ||
+      (payload.template === "essencial"
+        ? "Sequência guiada para adaptação do CRT 3 ao IBS/CBS com obrigatoriedades de 2026."
+        : undefined),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    tasks: [],
+  };
+
+  if (useTemplate) {
+    board.tasks = instantiateChecklistBlueprint({ checklistId: boardId, timestamp });
+  }
+
+  return board;
+}
+
+const UUID_REGEX = /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+
+async function fetchSupabaseChecklists(companyId: string): Promise<ChecklistBoard[]> {
+  if (!UUID_REGEX.test(companyId)) {
+    if (process.env.NODE_ENV === "development") {
+      console.info(
+        `[AuthContext] Pulando sincronização Supabase para empresa ${companyId} (ID não é UUID).`
+      );
+    }
+    return [];
+  }
+
+  const supabase = getSupabaseBrowserClient();
+  const {
+    data: { session },
+    error: sessionError,
+  } = await supabase.auth.getSession();
+
+  if (sessionError) {
+    console.error("Supabase session check failed", sessionError);
+    return [];
+  }
+
+  if (!session) {
+    if (process.env.NODE_ENV === "development" && !loggedCompaniesWithoutSession.has(companyId)) {
+      console.info(
+        `[AuthContext] Nenhuma sessão Supabase ativa encontrada ao buscar checklists da empresa ${companyId}. Pulando sincronização.`
+      );
+      loggedCompaniesWithoutSession.add(companyId);
+    }
+    return [];
+  }
+
+  try {
+    const boards = await fetchSupabaseCompanyBoards(supabase, companyId);
+    let audits: ChecklistTaskAuditEntry[] = [];
+
+    try {
+      audits = await fetchSupabaseTaskAudits(supabase, companyId);
+    } catch (auditError) {
+      if (isTaskAuditTableMissingError(auditError)) {
+        if (process.env.NODE_ENV === "development") {
+          console.info(
+            "[AuthContext] Tabela checklist_task_audits ausente. Execute a migração 202510200004_add_checklist_task_audits_table.sql para habilitar histórico."
+          );
+        }
+      } else {
+        console.error("Supabase fetchTaskAudits error", auditError);
+      }
+    }
+
+    const auditsByTask = groupTaskAuditsByTask(audits);
+    return boards.map((board) => ({
+      ...board,
+      tasks: board.tasks.map((task) => ({
+        ...task,
+        history: auditsByTask.get(task.id) ?? [],
+      })),
+    }));
+  } catch (error) {
+    console.error("Supabase fetchChecklists error", error);
+    return [];
+  }
+}
+
+async function updateSupabaseBoard(boardId: string, updates: ChecklistBoardUpdate) {
+  const supabase = getSupabaseBrowserClient();
+  const payload: Record<string, unknown> = { updated_at: nowISO() };
+
+  if (updates.name !== undefined) payload.name = updates.name;
+  if (updates.description !== undefined) payload.description = updates.description ?? null;
+
+  const { error } = await supabase
+    .from("checklists")
+    .update(payload)
+    .eq("id", boardId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function deleteSupabaseBoard(boardId: string) {
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase
+    .from("checklists")
+    .delete()
+    .eq("id", boardId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function insertSupabaseTask(task: ChecklistTask) {
+  const supabase = getSupabaseBrowserClient();
+  const payload = toSupabaseTaskInsert(task);
+  const handleMissingBlueprintColumn = async () => {
+    console.warn("[supabase] checklist_tasks missing blueprint_id column; retrying insert without it");
+    const { blueprint_id: _legacyBlueprint, ...rest } = payload as Database["public"]["Tables"]["checklist_tasks"]["Insert"] & {
+      blueprint_id?: unknown;
+    };
+    void _legacyBlueprint;
+    const fallbackPayload = rest as Database["public"]["Tables"]["checklist_tasks"]["Insert"];
+    const { error: fallbackError } = await supabase.from("checklist_tasks").insert(fallbackPayload);
+    if (!fallbackError) {
+      return;
+    }
+    throw fallbackError;
+  };
+
+  const { error } = await supabase.from("checklist_tasks").insert(payload);
+  if (!error) {
+    return;
+  }
+
+  if (error.code === "42703" || error.code === "PGRST204") {
+    await handleMissingBlueprintColumn();
+    return;
+  }
+
+  throw error;
+}
+
+async function updateSupabaseTask(boardId: string, taskId: string, updates: ChecklistTaskUpdate | { status: ChecklistTaskStatus }) {
+  const supabase = getSupabaseBrowserClient();
+  const payload = toSupabaseTaskUpdatePayload(updates);
+  const { error } = await supabase
+    .from("checklist_tasks")
+    .update(payload)
+    .eq("board_id", boardId)
+    .eq("id", taskId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+async function deleteSupabaseTask(boardId: string, taskId: string) {
+  const supabase = getSupabaseBrowserClient();
+  const { error } = await supabase
+    .from("checklist_tasks")
+    .delete()
+    .eq("board_id", boardId)
+    .eq("id", taskId);
+
+  if (error) {
+    throw error;
+  }
+}
+
+const INITIAL_STATE: StoredState = DEMO_INITIAL_STATE;
 
 const AuthContext = createContext<AuthContextValue | undefined>(undefined);
 
@@ -556,6 +563,168 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [companies, setCompanies] = useState<Company[]>(INITIAL_STATE.companies);
   const [session, setSession] = useState<SessionState | null>(null);
   const [loading, setLoading] = useState(true);
+  const fetchedChecklistsRef = useRef<Set<string>>(new Set());
+  const clearedStaleSessionRef = useRef(false);
+  const realtimeNotificationChannelsRef = useRef<Map<string, RealtimeChannel>>(new Map());
+  const notificationFetchQueueRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  const hydrateFromSupabase = useCallback(
+    async (nextSession: Session | null) => {
+      // Validação defensiva para garantir que temos uma sessão válida
+      if (!nextSession) {
+        console.log("ℹ️ nextSession é null, limpando estado");
+        fetchedChecklistsRef.current.clear();
+        setSession(null);
+        setUsers(INITIAL_STATE.users);
+        setCompanies(INITIAL_STATE.companies);
+        setLoading(false);
+        return;
+      }
+
+      if (!nextSession.user) {
+        console.log("ℹ️ nextSession.user é null, limpando estado");
+        fetchedChecklistsRef.current.clear();
+        setSession(null);
+        setUsers(INITIAL_STATE.users);
+        setCompanies(INITIAL_STATE.companies);
+        setLoading(false);
+        return;
+      }
+
+      if (!nextSession.user.id) {
+        console.log("ℹ️ nextSession.user.id é vazio, limpando estado");
+        fetchedChecklistsRef.current.clear();
+        setSession(null);
+        setUsers(INITIAL_STATE.users);
+        setCompanies(INITIAL_STATE.companies);
+        setLoading(false);
+        return;
+      }
+
+      const supabase = getSupabaseBrowserClient();
+      setLoading(true);
+
+      if (clearedStaleSessionRef.current) {
+        console.info("ℹ️ Sessão já foi sinalizada como inválida anteriormente. Aguardando novo login.");
+        setLoading(false);
+        return;
+      }
+
+      try {
+        const authUserId = nextSession.user.id;
+        console.log("🔄 Iniciando hydrate para userId:", authUserId);
+
+        const accessToken = nextSession.access_token;
+        if (!accessToken) {
+          console.warn("⚠️ Sessão Supabase sem access_token. Abortando hydrate.");
+          setLoading(false);
+          return;
+        }
+
+        const response = await fetch("/api/auth/session", {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+          },
+          cache: "no-store",
+        });
+
+        if (!response.ok) {
+          console.error("Hydrate via /api/auth/session falhou", {
+            status: response.status,
+            statusText: response.statusText,
+          });
+          clearedStaleSessionRef.current = true;
+          await supabase.auth.signOut({ scope: "local" }).catch((error) => {
+            console.error("Falha ao encerrar sessão Supabase", error);
+          });
+          fetchedChecklistsRef.current.clear();
+          setSession(null);
+          setUsers(INITIAL_STATE.users);
+          setCompanies(INITIAL_STATE.companies);
+          setLoading(false);
+          return;
+        }
+
+        type SessionHydrateSuccess = {
+          success: true;
+          data: {
+            sessionUserId: string;
+            users: User[];
+            company: Company;
+          };
+        };
+
+        type SessionHydrateError = {
+          success: false;
+          message?: string;
+        };
+
+        const payload = (await response.json()) as SessionHydrateSuccess | SessionHydrateError;
+
+        if (!payload.success) {
+          console.error("/api/auth/session retornou erro", payload);
+          clearedStaleSessionRef.current = true;
+          await supabase.auth.signOut({ scope: "local" }).catch((error) => {
+            console.error("Falha ao encerrar sessão Supabase", error);
+          });
+          fetchedChecklistsRef.current.clear();
+          setSession(null);
+          setUsers(INITIAL_STATE.users);
+          setCompanies(INITIAL_STATE.companies);
+          setLoading(false);
+          return;
+        }
+
+        const { company, users: nextUsers, sessionUserId } = payload.data;
+
+        clearedStaleSessionRef.current = false;
+        fetchedChecklistsRef.current.add(company.id);
+
+        setUsers(nextUsers);
+        setCompanies([company]);
+        setSession({ userId: sessionUserId });
+      } catch (error) {
+        console.error("Falha ao sincronizar sessão Supabase", error);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [],
+  );
+
+  const refreshCompanyNotifications = useCallback(
+    (companyId: string) => {
+      if (!UUID_REGEX.test(companyId)) {
+        return;
+      }
+
+      if (notificationFetchQueueRef.current.has(companyId)) {
+        return;
+      }
+
+      const supabase = getSupabaseBrowserClient();
+      const pending = fetchSupabaseChecklistNotifications(supabase, companyId)
+        .then((remoteNotifications) => {
+          setCompanies((previous) =>
+            previous.map((candidate) =>
+              candidate.id === companyId
+                ? recalculateCompany(candidate, candidate.checklists, remoteNotifications)
+                : candidate
+            )
+          );
+        })
+        .catch((error) => {
+          console.error("Supabase realtime notifications fetch failed", error);
+        })
+        .finally(() => {
+          notificationFetchQueueRef.current.delete(companyId);
+        });
+
+      notificationFetchQueueRef.current.set(companyId, pending);
+    },
+    [setCompanies],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -567,9 +736,135 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+
+    // Recuperar sessão com validação
+    supabase.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (error) {
+          console.warn("⚠️ Erro ao recuperar sessão:", error);
+          hydrateFromSupabase(null);
+          return;
+        }
+        
+        const session = data.session;
+        // Validar se a sessão tem um usuário válido
+        if (session && session.user && session.user.id) {
+          console.log("✅ Sessão válida encontrada para:", session.user.id);
+          hydrateFromSupabase(session);
+        } else {
+          console.log("ℹ️ Sessão inválida ou vazia, limpando");
+          hydrateFromSupabase(null);
+        }
+      })
+      .catch((error) => {
+        console.error("❌ Falha crítica ao recuperar sessão Supabase:", error);
+        hydrateFromSupabase(null);
+      });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      console.log("🔔 Auth state changed:", _event);
+      hydrateFromSupabase(nextSession);
+    });
+
+    return () => {
+      listener.subscription.unsubscribe();
+    };
+  }, [hydrateFromSupabase]);
+
+  useEffect(() => {
     if (loading) return;
     saveStorage({ users, companies, session });
   }, [users, companies, session, loading]);
+
+  useEffect(() => {
+    const supabase = getSupabaseBrowserClient();
+    const channelMap = realtimeNotificationChannelsRef.current;
+
+    if (!session) {
+      channelMap.forEach((channel) => {
+        void supabase.removeChannel(channel);
+      });
+      channelMap.clear();
+      return;
+    }
+
+    const trackableCompanies = new Set(
+      companies
+        .filter((company) => UUID_REGEX.test(company.id))
+        .map((company) => company.id),
+    );
+
+    for (const [companyId, channel] of channelMap.entries()) {
+      if (!trackableCompanies.has(companyId)) {
+        void supabase.removeChannel(channel);
+        channelMap.delete(companyId);
+      }
+    }
+
+    companies.forEach((company) => {
+      if (!UUID_REGEX.test(company.id)) return;
+      if (channelMap.has(company.id)) return;
+
+      const channel = supabase
+        .channel(`checklist_notifications:${company.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "*",
+            schema: "public",
+            table: "checklist_notifications",
+            filter: `company_id=eq.${company.id}`,
+          },
+          () => {
+            refreshCompanyNotifications(company.id);
+          },
+        )
+        .subscribe((status) => {
+          if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            console.error(`Supabase realtime channel issue for company ${company.id}: ${status}`);
+          }
+        });
+
+      channelMap.set(company.id, channel);
+    });
+  }, [companies, refreshCompanyNotifications, session]);
+
+  useEffect(() => {
+    const channelMap = realtimeNotificationChannelsRef.current;
+    return () => {
+      const supabase = getSupabaseBrowserClient();
+      channelMap.forEach((channel) => {
+        void supabase.removeChannel(channel);
+      });
+      channelMap.clear();
+    };
+  }, []);
+
+  useEffect(() => {
+    companies.forEach((company) => {
+      if (fetchedChecklistsRef.current.has(company.id)) return;
+
+      fetchedChecklistsRef.current.add(company.id);
+      fetchSupabaseChecklists(company.id)
+        .then((remoteBoards) => {
+          if (!remoteBoards.length) return;
+
+          setCompanies((previous) =>
+            previous.map((candidate) =>
+              candidate.id === company.id
+                ? recalculateCompany(candidate, remoteBoards, candidate.notifications)
+                : candidate
+            )
+          );
+        })
+        .catch((error) => {
+          console.error("Supabase fetchChecklists failed", error);
+          fetchedChecklistsRef.current.delete(company.id);
+        });
+    });
+  }, [companies]);
 
   const currentUser = useMemo(() => {
     if (!session) return null;
@@ -593,7 +888,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     switch (targetUser.role) {
       case "empresa":
-        return companies.filter((company) => company.id === targetUser.id);
+        return companies.filter(
+          (company) =>
+            company.ownerId === targetUser.id ||
+            company.id === targetUser.companyId ||
+            company.id === targetUser.id,
+        );
       case "colaborador":
         return companies.filter((company) => company.employees.includes(userId));
       case "contador":
@@ -604,16 +904,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const login: AuthContextValue["login"] = async ({ email, password }) => {
-    const user = users.find((u) => u.email.toLowerCase() === email.toLowerCase());
-    if (!user || user.password !== password) {
-      return { success: false, message: "Credenciais inválidas" };
+    const supabase = getSupabaseBrowserClient();
+
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+
+      if (error || !data.session) {
+        const status = (error as { status?: number } | null | undefined)?.status;
+        if (status === 400) {
+          return {
+            success: false,
+            code: "invalid-credentials",
+            message: "E-mail ou senha incorretos. Verifique e tente novamente.",
+          };
+        }
+
+        const fallbackMessage = error?.message ?? "Não foi possível autenticar. Tente novamente em instantes.";
+        return { success: false, code: "unknown-error", message: fallbackMessage };
+      }
+
+      await hydrateFromSupabase(data.session);
+      return { success: true };
+    } catch (caughtError) {
+      console.error("Supabase sign in threw an exception", caughtError);
+      return {
+        success: false,
+        code: "network-error",
+        message: "Não foi possível conectar ao serviço de autenticação. Verifique sua conexão e tente novamente.",
+      };
     }
-    setSession({ userId: user.id });
-    return { success: true };
   };
 
   const logout = () => {
-    setSession(null);
+    const supabase = getSupabaseBrowserClient();
+    supabase.auth.signOut().catch((error) => console.error("Falha ao encerrar sessão Supabase", error));
+    void hydrateFromSupabase(null);
   };
 
   const isEmailInUse = (email: string) =>
@@ -627,42 +952,83 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     sector,
     cnpj,
   }) => {
-    if (isEmailInUse(email)) {
-      return { success: false, message: "E-mail já cadastrado" };
-    }
-
-    const id = generateId("empresa");
-    const board = createDefaultChecklistBoard(id);
-
-    const user: User = {
-      id,
-      name,
-      email,
-      password,
-      role: "empresa",
-    };
-
-    const company: Company = {
-      id,
-      ownerId: id,
-      name,
+    const sanitized = {
+      name: name.trim(),
+      email: email.trim().toLowerCase(),
+      password: password.trim(),
       regime,
       sector,
-      cnpj,
-      origin: undefined,
-      maturity: "Inicial",
-      riskLevel: "verde",
-      checklistProgress: calculateChecklistProgressFromBoards([board]),
-      employees: [],
-      accountantIds: [],
-      metadata: {},
-      checklists: [board],
-      notifications: buildChecklistNotifications([board]),
+      cnpj: cnpj?.trim() ?? "",
     };
 
-    setUsers((prev) => [...prev, user]);
-    setCompanies((prev) => [...prev, company]);
-    setSession({ userId: id });
+    if (!sanitized.email || !sanitized.password || !sanitized.name) {
+      return { success: false, message: "Preencha nome, e-mail e senha para criar sua conta." };
+    }
+
+    let response: Response;
+    try {
+      response = await fetch("/api/register-company", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          name: sanitized.name,
+          email: sanitized.email,
+          password: sanitized.password,
+          regime: sanitized.regime,
+          sector: sanitized.sector,
+          cnpj: sanitized.cnpj,
+        }),
+      });
+    } catch (networkError) {
+      console.error("Register company request failed", networkError);
+      return { success: false, message: "Não foi possível conectar ao serviço de cadastro" };
+    }
+
+    type ApiSuccess = {
+      success: true;
+      data: {
+        userId: string;
+        companyId: string;
+        board: ChecklistBoard;
+      };
+    };
+
+    type ApiError = {
+      success: false;
+      message: string;
+    };
+
+    let payload: ApiSuccess | ApiError;
+    try {
+      payload = (await response.json()) as ApiSuccess | ApiError;
+    } catch (parseError) {
+      console.error("Failed to parse register company response", parseError);
+      return { success: false, message: "Resposta inesperada do serviço de cadastro" };
+    }
+
+    if (!response.ok || !payload.success) {
+      const message = payload.success ? "Falha ao cadastrar empresa" : payload.message;
+      return { success: false, message };
+    }
+
+    const supabase = getSupabaseBrowserClient();
+    const { data: signInData, error: signInError } = await supabase.auth.signInWithPassword({
+      email: sanitized.email,
+      password: sanitized.password,
+    });
+
+    if (signInError || !signInData.session) {
+      console.error("Supabase sign in after register failed", signInError);
+      return {
+        success: false,
+        message:
+          "Conta criada, mas não foi possível autenticar automaticamente. Tente fazer login com seu e-mail e senha.",
+      };
+    }
+
+    await hydrateFromSupabase(signInData.session);
     return { success: true };
   };
 
@@ -681,7 +1047,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: false, message: "Empresa não encontrada" };
     }
 
-    const id = generateId("colaborador");
+  const id = generateUuid();
     const collaborator: User = {
       id,
       name,
@@ -729,7 +1095,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return { success: true };
     }
 
-    const id = generateId("contador");
+  const id = generateUuid();
     const accountant: User = {
       id,
       name,
@@ -785,72 +1151,556 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  type TaskEventAction = "created" | "updated" | "deleted" | "completed" | "reopened";
+  type BoardEventAction = "created" | "updated" | "deleted";
+
+  const TASK_EVENT_TITLES: Record<TaskEventAction, string> = {
+    created: "Nova tarefa cadastrada",
+    updated: "Tarefa atualizada",
+    deleted: "Tarefa removida",
+    completed: "Tarefa concluída",
+    reopened: "Tarefa reaberta",
+  };
+
+  const BOARD_EVENT_TITLES: Record<BoardEventAction, string> = {
+    created: "Checklist criado",
+    updated: "Checklist atualizado",
+    deleted: "Checklist removido",
+  };
+
+  const TASK_STATUS_LABELS: Record<ChecklistTaskStatus, string> = {
+    todo: "A fazer",
+    doing: "Em andamento",
+    done: "Concluída",
+  };
+
+  type TaskFieldKey = "owner" | "dueDate" | "priority" | "severity" | "category" | "pillar" | "phase";
+
+  type TaskFieldChangeDescriptor = {
+    key: TaskFieldKey;
+    notificationMessage: string;
+    auditMessage: string;
+    change: { from: unknown; to: unknown };
+  };
+
+  type StatusChangeDescriptor = {
+    summary: string;
+    event: ChecklistTaskAuditEvent;
+    change: { from: ChecklistTaskStatus; to: ChecklistTaskStatus };
+  };
+
+  function collectTaskFieldChanges(before: ChecklistTask, after: ChecklistTask): TaskFieldChangeDescriptor[] {
+    const descriptors: TaskFieldChangeDescriptor[] = [];
+
+    if (before.owner !== after.owner) {
+      descriptors.push({
+        key: "owner",
+        notificationMessage: `responsável agora ${after.owner}`,
+        auditMessage: `Responsável agora ${after.owner}.`,
+        change: { from: before.owner, to: after.owner },
+      });
+    }
+
+    if (before.dueDate !== after.dueDate) {
+      const fromLabel = before.dueDate ? formatDueDateLabel(before.dueDate) : "sem prazo";
+      const toLabel = after.dueDate ? formatDueDateLabel(after.dueDate) : "sem prazo";
+      descriptors.push({
+        key: "dueDate",
+        notificationMessage: `prazo alterado de ${fromLabel} para ${toLabel}`,
+        auditMessage: `Prazo alterado de ${fromLabel} para ${toLabel}.`,
+        change: { from: before.dueDate ?? null, to: after.dueDate ?? null },
+      });
+    }
+
+    if (before.priority !== after.priority) {
+      const label = after.priority ?? "indefinida";
+      descriptors.push({
+        key: "priority",
+        notificationMessage: `prioridade agora ${label}`,
+        auditMessage: `Prioridade agora ${label}.`,
+        change: { from: before.priority ?? null, to: after.priority ?? null },
+      });
+    }
+
+    if (before.severity !== after.severity) {
+      descriptors.push({
+        key: "severity",
+        notificationMessage: `severidade alterada para ${after.severity}`,
+        auditMessage: `Severidade alterada para ${after.severity}.`,
+        change: { from: before.severity, to: after.severity },
+      });
+    }
+
+    if (before.category !== after.category) {
+      descriptors.push({
+        key: "category",
+        notificationMessage: `categoria agora ${after.category}`,
+        auditMessage: `Categoria agora ${after.category}.`,
+        change: { from: before.category, to: after.category },
+      });
+    }
+
+    if (before.pillar !== after.pillar) {
+      const toLabel = after.pillar ?? "sem pilar";
+      descriptors.push({
+        key: "pillar",
+        notificationMessage: `pilar agora ${toLabel}`,
+        auditMessage: `Pilar agora ${toLabel}.`,
+        change: { from: before.pillar ?? null, to: after.pillar ?? null },
+      });
+    }
+
+    if (before.phase !== after.phase) {
+      const toLabel = after.phase ?? "sem fase";
+      descriptors.push({
+        key: "phase",
+        notificationMessage: `fase agora ${toLabel}`,
+        auditMessage: `Fase agora ${toLabel}.`,
+        change: { from: before.phase ?? null, to: after.phase ?? null },
+      });
+    }
+
+    return descriptors;
+  }
+
+  function collectStatusChange(before: ChecklistTask, after: ChecklistTask): StatusChangeDescriptor | null {
+    if (before.status === after.status) {
+      return null;
+    }
+
+    if (after.status === "done") {
+      return {
+        summary: `“${after.title}” foi concluída.`,
+        event: "completed",
+        change: { from: before.status, to: after.status },
+      };
+    }
+
+    if (before.status === "done") {
+      return {
+        summary: `“${after.title}” foi reaberta para acompanhamento.`,
+        event: "reopened",
+        change: { from: before.status, to: after.status },
+      };
+    }
+
+    return {
+      summary: `Status alterado de ${TASK_STATUS_LABELS[before.status]} para ${TASK_STATUS_LABELS[after.status]}.`,
+      event: "status_changed",
+      change: { from: before.status, to: after.status },
+    };
+  }
+
+  type TaskAuditDetails = {
+    summary: string;
+    changeSet: ChecklistTaskChangeSet;
+    event: ChecklistTaskAuditEvent;
+  };
+
+  function buildTaskAuditDetails(before: ChecklistTask, after: ChecklistTask): TaskAuditDetails | null {
+    const fieldChanges = collectTaskFieldChanges(before, after);
+    const changeSet: ChecklistTaskChangeSet = {};
+    const summaryParts = fieldChanges.map((change) => {
+      changeSet[change.key] = change.change;
+      return change.auditMessage;
+    });
+
+    const statusChange = collectStatusChange(before, after);
+    let primaryEvent: ChecklistTaskAuditEvent | null = null;
+    if (statusChange) {
+      changeSet.status = statusChange.change;
+      summaryParts.unshift(statusChange.summary);
+      primaryEvent = statusChange.event;
+    }
+
+    if (!summaryParts.length) {
+      return null;
+    }
+
+    return {
+      summary: summaryParts.join(" "),
+      changeSet,
+      event: primaryEvent ?? "updated",
+    };
+  }
+
+  function buildTaskCreationAuditEntry(
+    companyId: string,
+    board: ChecklistBoard,
+    task: ChecklistTask,
+    actor: PublicUser | null,
+    timestamp: string
+  ): ChecklistTaskAuditEntry {
+    const actorId = actor?.id ?? null;
+    const actorName = actor?.name ?? "Sistema";
+    const actorRole = actor?.role ?? null;
+
+    const changeSet: ChecklistTaskChangeSet = {
+      status: { from: null, to: task.status },
+      owner: { from: null, to: task.owner },
+      severity: { from: null, to: task.severity },
+      category: { from: null, to: task.category },
+    };
+
+    if (task.dueDate) {
+      changeSet.dueDate = { from: null, to: task.dueDate };
+    }
+
+    if (task.priority) {
+      changeSet.priority = { from: null, to: task.priority };
+    }
+
+    if (task.phase) {
+      changeSet.phase = { from: null, to: task.phase };
+    }
+
+    if (task.pillar) {
+      changeSet.pillar = { from: null, to: task.pillar };
+    }
+
+    return {
+      id: generateUuid(),
+      companyId,
+      checklistId: board.id,
+      taskId: task.id,
+      event: "created",
+      summary: `“${task.title}” foi criada no checklist “${board.name}” por ${actorName}.`,
+      changes: changeSet,
+      actorId,
+      actorName,
+      actorRole,
+      createdAt: timestamp,
+    };
+  }
+
+  function buildTaskUpdateAuditEntry(
+    companyId: string,
+    board: ChecklistBoard,
+    before: ChecklistTask,
+    after: ChecklistTask,
+    actor: PublicUser | null,
+    timestamp: string
+  ): ChecklistTaskAuditEntry | null {
+    const details = buildTaskAuditDetails(before, after);
+    if (!details) {
+      return null;
+    }
+
+    return {
+      id: generateUuid(),
+      companyId,
+      checklistId: board.id,
+      taskId: after.id,
+      event: details.event,
+      summary: details.summary,
+      changes: details.changeSet,
+      actorId: actor?.id ?? null,
+      actorName: actor?.name ?? "Sistema",
+      actorRole: actor?.role ?? null,
+      createdAt: timestamp,
+    };
+  }
+
+  type BoardUpdateOptions = {
+    notifications?:
+      | ChecklistNotification[]
+      | ((args: {
+          company: Company;
+          previousBoards: ChecklistBoard[];
+          nextBoards: ChecklistBoard[];
+        }) => ChecklistNotification[]);
+  };
+
+  const buildTaskEventNotification = (
+    action: TaskEventAction,
+    board: ChecklistBoard,
+    task: ChecklistTask,
+    severity: NotificationSeverity,
+    message: string,
+    metadata: Record<string, unknown> = {},
+    overrideTitle?: string
+  ) => {
+    return createChecklistEventNotification({
+      kind: "task_event",
+      checklistId: board.id,
+      taskId: task.id,
+      severity,
+      title: overrideTitle ?? TASK_EVENT_TITLES[action],
+      message,
+      dueDate: task.dueDate,
+      phase: task.phase,
+      priority: task.priority,
+      pillar: task.pillar,
+      metadata: {
+        action,
+        boardId: board.id,
+        boardName: board.name,
+        owner: task.owner,
+        category: task.category,
+        ...metadata,
+      },
+    });
+  };
+
+  const buildBoardEventNotification = (
+    action: BoardEventAction,
+    board: ChecklistBoard,
+    severity: NotificationSeverity,
+    message: string,
+    metadata: Record<string, unknown> = {},
+    overrideTitle?: string
+  ) => {
+    return createChecklistEventNotification({
+      kind: "board_event",
+      checklistId: board.id,
+      taskId: null,
+      severity,
+      title: overrideTitle ?? BOARD_EVENT_TITLES[action],
+      message,
+      dueDate: undefined,
+      metadata: {
+        action,
+        boardId: board.id,
+        boardName: board.name,
+        ...metadata,
+      },
+    });
+  };
+
+  const describeTaskUpdates = (
+    board: ChecklistBoard,
+    before: ChecklistTask,
+    after: ChecklistTask
+  ): ChecklistNotification[] => {
+    const notifications: ChecklistNotification[] = [];
+
+    const statusChange = collectStatusChange(before, after);
+    if (statusChange?.event === "completed") {
+      notifications.push(
+        buildTaskEventNotification(
+          "completed",
+          board,
+          after,
+          "verde",
+          statusChange.summary
+        )
+      );
+    } else if (statusChange?.event === "reopened") {
+      notifications.push(
+        buildTaskEventNotification(
+          "reopened",
+          board,
+          after,
+          "laranja",
+          statusChange.summary
+        )
+      );
+    }
+
+    const fieldChanges = collectTaskFieldChanges(before, after);
+    if (!fieldChanges.length) {
+      return notifications;
+    }
+
+    const metadataChanges: ChecklistTaskChangeSet = {};
+    fieldChanges.forEach((change) => {
+      metadataChanges[change.key] = change.change;
+    });
+
+    let severity: NotificationSeverity = "laranja";
+    if (metadataChanges.severity) {
+      severity = after.severity;
+    } else if (statusChange?.change.from === "done" && statusChange.change.to !== "done") {
+      severity = "laranja";
+    }
+
+    const message = `Atualizações em “${after.title}”: ${fieldChanges
+      .map((change) => change.notificationMessage)
+      .join("; ")}.`;
+
+    notifications.push(
+      buildTaskEventNotification(
+        "updated",
+        board,
+        after,
+        severity,
+        message,
+        {
+          changes: metadataChanges,
+        }
+      )
+    );
+
+    return notifications;
+  };
+
   const applyBoardUpdate = (
     companyId: string,
-    updater: (boards: ChecklistBoard[]) => ChecklistBoard[]
+    updater: (boards: ChecklistBoard[]) => ChecklistBoard[],
+    options: BoardUpdateOptions = {}
   ) => {
+    let nextNotificationSnapshot: ChecklistNotification[] | null = null;
     setCompanies((prev) =>
       prev.map((company) => {
         if (company.id !== companyId) return company;
-        const nextBoards = updater(company.checklists);
-        return recalculateCompany(company, nextBoards, company.notifications);
+        const previousBoards = company.checklists;
+        const nextBoards = updater(previousBoards);
+
+        const computedNotifications = options.notifications
+          ? typeof options.notifications === "function"
+            ? options.notifications({ company, previousBoards, nextBoards })
+            : options.notifications
+          : [];
+
+        const appendedNotifications = computedNotifications.length
+          ? [...company.notifications, ...computedNotifications]
+          : company.notifications;
+
+        const recalculated = recalculateCompany(company, nextBoards, appendedNotifications);
+        nextNotificationSnapshot = recalculated.notifications;
+        return recalculated;
       })
     );
+
+    if (nextNotificationSnapshot && UUID_REGEX.test(companyId)) {
+      const supabase = getSupabaseBrowserClient();
+      void syncSupabaseChecklistNotifications(supabase, companyId, nextNotificationSnapshot).catch((error) => {
+        console.error("Supabase sync notifications failed", error);
+      });
+    }
   };
 
   const createChecklistBoard: AuthContextValue["createChecklistBoard"] = (companyId, payload) => {
-    applyBoardUpdate(companyId, (boards) => {
-      const timestamp = nowISO();
-      if (payload.template === "essencial") {
-        const template = createDefaultChecklistBoard(companyId);
-        const baseId = generateId("checklist");
-        return [
-          ...boards,
-          {
-            id: baseId,
-            companyId,
-            name: payload.name ?? template.name,
-            description: payload.description ?? template.description,
-            createdAt: timestamp,
-            updatedAt: timestamp,
-            tasks: instantiateChecklistBlueprint({ checklistId: baseId, timestamp }),
-          },
-        ];
-      }
+    const board = buildChecklistBoard(companyId, payload);
 
-      const newBoard: ChecklistBoard = {
-        id: generateId("checklist"),
-        companyId,
-        name: payload.name,
-        description: payload.description,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        tasks: [],
-      };
-      return [...boards, newBoard];
+    applyBoardUpdate(
+      companyId,
+      (boards) => [...boards, board],
+      {
+        notifications: [
+          buildBoardEventNotification(
+            "created",
+            board,
+            "verde",
+            `Checklist “${board.name}” foi criado.`
+          ),
+        ],
+      }
+    );
+
+    const supabase = getSupabaseBrowserClient();
+    void insertSupabaseBoardWithTasks(supabase, board).catch((error) => {
+      console.error("Supabase createChecklistBoard failed", error);
     });
   };
 
   const updateChecklistBoard: AuthContextValue["updateChecklistBoard"] = (companyId, boardId, updates) => {
-    applyBoardUpdate(companyId, (boards) =>
-      boards.map((board) =>
-        board.id === boardId
-          ? {
-              ...board,
-              name: updates.name ?? board.name,
-              description: updates.description ?? board.description,
-              updatedAt: nowISO(),
-            }
-          : board
-      )
+    const timestamp = nowISO();
+    let previousBoard: ChecklistBoard | null = null;
+    let nextBoardSnapshot: ChecklistBoard | null = null;
+
+    applyBoardUpdate(
+      companyId,
+      (boards) =>
+        boards.map((board) => {
+          if (board.id !== boardId) return board;
+          previousBoard = board;
+          const updatedBoard: ChecklistBoard = {
+            ...board,
+            name: updates.name ?? board.name,
+            description: updates.description ?? board.description,
+            updatedAt: timestamp,
+          };
+          nextBoardSnapshot = updatedBoard;
+          return updatedBoard;
+        }),
+      {
+        notifications: () => {
+          if (!previousBoard || !nextBoardSnapshot) return [];
+
+          const changes: string[] = [];
+          const metadata: Record<string, { from: unknown; to: unknown }> = {};
+
+          if (previousBoard.name !== nextBoardSnapshot.name) {
+            changes.push(`nome alterado de “${previousBoard.name}” para “${nextBoardSnapshot.name}”`);
+            metadata.name = { from: previousBoard.name, to: nextBoardSnapshot.name };
+          }
+
+          if ((previousBoard.description ?? "") !== (nextBoardSnapshot.description ?? "")) {
+            changes.push("descrição atualizada");
+            metadata.description = {
+              from: previousBoard.description ?? null,
+              to: nextBoardSnapshot.description ?? null,
+            };
+          }
+
+          if (!changes.length) {
+            return [];
+          }
+
+          const detail =
+            changes.length === 1
+              ? changes[0]
+              : `atualizações: ${changes.join("; ")}`;
+
+          return [
+            buildBoardEventNotification(
+              "updated",
+              nextBoardSnapshot,
+              "laranja",
+              `Checklist “${nextBoardSnapshot.name}” ${detail}.`,
+              { changes: metadata }
+            ),
+          ];
+        },
+      }
     );
+
+    void updateSupabaseBoard(boardId, updates).catch((error) => {
+      console.error("Supabase updateChecklistBoard failed", error);
+    });
   };
 
   const removeChecklistBoard: AuthContextValue["removeChecklistBoard"] = (companyId, boardId) => {
-    applyBoardUpdate(companyId, (boards) => {
-      const filtered = boards.filter((board) => board.id !== boardId);
-      if (filtered.length) return filtered;
-      return [createDefaultChecklistBoard(companyId)];
+    let removedBoard: ChecklistBoard | null = null;
+
+    applyBoardUpdate(
+      companyId,
+      (boards) => {
+        const filtered = boards.filter((board) => {
+          if (board.id === boardId) {
+            removedBoard = board;
+            return false;
+          }
+          return true;
+        });
+
+        if (filtered.length) return filtered;
+
+        const fallback = createDefaultChecklistBoard(companyId);
+        const supabase = getSupabaseBrowserClient();
+        void insertSupabaseBoardWithTasks(supabase, fallback).catch((error) => {
+          console.error("Supabase create fallback checklist failed", error);
+        });
+        return [fallback];
+      },
+      {
+        notifications: () =>
+          removedBoard
+            ? [
+                buildBoardEventNotification(
+                  "deleted",
+                  removedBoard,
+                  "vermelho",
+                  `Checklist “${removedBoard.name}” foi removido.`
+                ),
+              ]
+            : [],
+      }
+    );
+
+    void deleteSupabaseBoard(boardId).catch((error) => {
+      console.error("Supabase removeChecklistBoard failed", error);
     });
   };
 
@@ -859,37 +1709,85 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     boardId,
     payload
   ) => {
-    applyBoardUpdate(companyId, (boards) =>
-      boards.map((board) => {
-        if (board.id !== boardId) return board;
-        const timestamp = nowISO();
-        const newTask: ChecklistTask = {
-          id: generateId("task"),
-          checklistId: boardId,
-          title: payload.title,
-          description: payload.description ?? "",
-          severity: sanitizeSeverity(payload.severity),
-          status: sanitizeStatus(payload.status ?? "todo"),
-          owner: payload.owner,
-          category: sanitizeCategory(payload.category),
-          dueDate: payload.dueDate,
-          phase: sanitizePhase(payload.phase),
-          pillar: sanitizePillar(payload.pillar),
-          priority: sanitizePriority(payload.priority),
-          references: sanitizeReferences(payload.references),
-          evidences: sanitizeEvidences(payload.evidences),
-          notes: sanitizeNotes(payload.notes),
-          tags: sanitizeTags(payload.tags),
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        };
-        return {
-          ...board,
-          tasks: [...board.tasks, newTask],
-          updatedAt: timestamp,
-        };
-      })
+    const timestamp = nowISO();
+    let createdTask: ChecklistTask | null = null;
+    let boardSnapshot: ChecklistBoard | null = null;
+    let creationAudit: ChecklistTaskAuditEntry | null = null;
+    const actor = currentUser;
+
+    applyBoardUpdate(
+      companyId,
+      (boards) =>
+        boards.map((board) => {
+          if (board.id !== boardId) return board;
+          const baseTask: ChecklistTask = {
+            id: generateUuid(),
+            checklistId: boardId,
+            title: payload.title,
+            description: payload.description ?? "",
+            severity: sanitizeSeverity(payload.severity),
+            status: sanitizeStatus(payload.status ?? "todo"),
+            owner: payload.owner,
+            category: sanitizeCategory(payload.category),
+            dueDate: payload.dueDate,
+            phase: sanitizePhase(payload.phase),
+            pillar: sanitizePillar(payload.pillar),
+            priority: sanitizePriority(payload.priority),
+            references: sanitizeReferences(payload.references),
+            evidences: sanitizeEvidences(payload.evidences),
+            notes: sanitizeNotes(payload.notes),
+            tags: sanitizeTags(payload.tags),
+            createdAt: timestamp,
+            updatedAt: timestamp,
+            history: [],
+          };
+
+          creationAudit = buildTaskCreationAuditEntry(companyId, board, baseTask, actor, timestamp);
+          const newTask: ChecklistTask = {
+            ...baseTask,
+            history: creationAudit ? [creationAudit] : [],
+          };
+          createdTask = newTask;
+          const nextBoard: ChecklistBoard = {
+            ...board,
+            tasks: [...board.tasks, newTask],
+            updatedAt: timestamp,
+          };
+          boardSnapshot = nextBoard;
+          return nextBoard;
+        }),
+      {
+        notifications: () =>
+          createdTask && boardSnapshot
+            ? [
+                buildTaskEventNotification(
+                  "created",
+                  boardSnapshot,
+                  createdTask,
+                  "verde",
+                  `Tarefa “${createdTask.title}” foi cadastrada no checklist “${boardSnapshot.name}”.`
+                ),
+              ]
+            : [],
+      }
     );
+
+    if (createdTask) {
+      const taskToPersist = createdTask;
+      const auditToPersist = creationAudit;
+      void (async () => {
+        try {
+          await insertSupabaseTask(taskToPersist);
+          await updateSupabaseBoard(boardId, {});
+          if (auditToPersist) {
+            const supabase = getSupabaseBrowserClient();
+            await insertSupabaseTaskAudit(supabase, auditToPersist);
+          }
+        } catch (error) {
+          console.error("Supabase createChecklistTask failed", error);
+        }
+      })();
+    }
   };
 
   const updateChecklistTask: AuthContextValue["updateChecklistTask"] = (
@@ -898,15 +1796,43 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     taskId,
     updates
   ) => {
-    applyBoardUpdate(companyId, (boards) =>
-      boards.map((board) => {
-        if (board.id !== boardId) return board;
-        const timestamp = nowISO();
-        return {
-          ...board,
-          tasks: board.tasks.map((task) => {
+    const timestamp = nowISO();
+    let sanitizedUpdates: ChecklistTaskUpdate | null = null;
+    let boardSnapshot: ChecklistBoard | null = null;
+    let beforeTask: ChecklistTask | null = null;
+    let afterTask: ChecklistTask | null = null;
+    let pendingAuditEntry: ChecklistTaskAuditEntry | null = null;
+    const actor = currentUser;
+
+    applyBoardUpdate(
+      companyId,
+      (boards) =>
+        boards.map((board) => {
+          if (board.id !== boardId) return board;
+          const nextTasks = board.tasks.map((task) => {
             if (task.id !== taskId) return task;
-            return {
+            beforeTask = task;
+            sanitizedUpdates = {
+              ...updates,
+              severity: updates.severity ? sanitizeSeverity(updates.severity) : updates.severity,
+              status: updates.status ? sanitizeStatus(updates.status) : updates.status,
+              category: updates.category ? sanitizeCategory(updates.category) : updates.category,
+              phase: updates.phase ? sanitizePhase(updates.phase) : updates.phase,
+              pillar: updates.pillar ? sanitizePillar(updates.pillar) : updates.pillar,
+              priority: updates.priority ? sanitizePriority(updates.priority) : updates.priority,
+              references: updates.hasOwnProperty("references")
+                ? sanitizeReferences(updates.references)
+                : updates.references,
+              evidences: updates.hasOwnProperty("evidences")
+                ? sanitizeEvidences(updates.evidences)
+                : updates.evidences,
+              notes: updates.hasOwnProperty("notes")
+                ? sanitizeNotes(updates.notes)
+                : updates.notes,
+              tags: updates.hasOwnProperty("tags") ? sanitizeTags(updates.tags) : updates.tags,
+            } as ChecklistTaskUpdate;
+
+            const candidateTask: ChecklistTask = {
               ...task,
               title: updates.title ?? task.title,
               description: updates.description ?? task.description,
@@ -927,26 +1853,107 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               notes: updates.hasOwnProperty("notes") ? sanitizeNotes(updates.notes) : task.notes,
               tags: updates.hasOwnProperty("tags") ? sanitizeTags(updates.tags) : task.tags,
               updatedAt: timestamp,
+              history: task.history,
             };
-          }),
-          updatedAt: timestamp,
-        };
-      })
+
+            const auditEntry = buildTaskUpdateAuditEntry(companyId, board, task, candidateTask, actor, timestamp);
+            if (auditEntry) {
+              pendingAuditEntry = auditEntry;
+            }
+
+            const nextTask: ChecklistTask = auditEntry
+              ? {
+                  ...candidateTask,
+                  history: [...task.history, auditEntry],
+                }
+              : candidateTask;
+
+            afterTask = nextTask;
+            return nextTask;
+          });
+
+          const nextBoard: ChecklistBoard = {
+            ...board,
+            tasks: nextTasks,
+            updatedAt: timestamp,
+          };
+
+          if (afterTask) {
+            boardSnapshot = nextBoard;
+          }
+
+          return nextBoard;
+        }),
+      {
+        notifications: () =>
+          beforeTask && afterTask && boardSnapshot
+            ? describeTaskUpdates(boardSnapshot, beforeTask, afterTask)
+            : [],
+      }
     );
+
+    if (sanitizedUpdates) {
+      const payload = sanitizedUpdates;
+      const auditToPersist = pendingAuditEntry;
+      void (async () => {
+        try {
+          await updateSupabaseTask(boardId, taskId, payload);
+          await updateSupabaseBoard(boardId, {});
+          if (auditToPersist) {
+            const supabase = getSupabaseBrowserClient();
+            await insertSupabaseTaskAudit(supabase, auditToPersist);
+          }
+        } catch (error) {
+          console.error("Supabase updateChecklistTask failed", error);
+        }
+      })();
+    }
   };
 
   const deleteChecklistTask: AuthContextValue["deleteChecklistTask"] = (companyId, boardId, taskId) => {
-    applyBoardUpdate(companyId, (boards) =>
-      boards.map((board) => {
-        if (board.id !== boardId) return board;
-        const timestamp = nowISO();
-        return {
-          ...board,
-          tasks: board.tasks.filter((task) => task.id !== taskId),
-          updatedAt: timestamp,
-        };
-      })
+    const timestamp = nowISO();
+    let removedTask: ChecklistTask | null = null;
+    let boardSnapshot: ChecklistBoard | null = null;
+
+    applyBoardUpdate(
+      companyId,
+      (boards) =>
+        boards.map((board) => {
+          if (board.id !== boardId) return board;
+          removedTask = board.tasks.find((task) => task.id === taskId) ?? null;
+          const nextTasks = board.tasks.filter((task) => task.id !== taskId);
+          const nextBoard: ChecklistBoard = {
+            ...board,
+            tasks: nextTasks,
+            updatedAt: timestamp,
+          };
+          boardSnapshot = nextBoard;
+          return nextBoard;
+        }),
+      {
+        notifications: () =>
+          removedTask && boardSnapshot
+            ? [
+                buildTaskEventNotification(
+                  "deleted",
+                  boardSnapshot,
+                  removedTask,
+                  "vermelho",
+                  `Tarefa “${removedTask.title}” foi removida do checklist “${boardSnapshot.name}”.`
+                ),
+              ]
+            : [],
+      }
     );
+
+    void (async () => {
+      try {
+        await deleteSupabaseTask(boardId, taskId);
+        await updateSupabaseBoard(boardId, {});
+      } catch (error) {
+        console.error("Supabase deleteChecklistTask failed", error);
+      }
+    })();
   };
 
   const updateChecklistTaskStatus: AuthContextValue["updateChecklistTaskStatus"] = (
@@ -956,25 +1963,76 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     status
   ) => {
     const sanitized = sanitizeStatus(status);
-    applyBoardUpdate(companyId, (boards) =>
-      boards.map((board) => {
-        if (board.id !== boardId) return board;
-        const timestamp = nowISO();
-        return {
-          ...board,
-          tasks: board.tasks.map((task) =>
-            task.id === taskId
+    const timestamp = nowISO();
+    let boardSnapshot: ChecklistBoard | null = null;
+    let beforeTask: ChecklistTask | null = null;
+    let afterTask: ChecklistTask | null = null;
+    let pendingAuditEntry: ChecklistTaskAuditEntry | null = null;
+    const actor = currentUser;
+
+    applyBoardUpdate(
+      companyId,
+      (boards) =>
+        boards.map((board) => {
+          if (board.id !== boardId) return board;
+          const nextTasks = board.tasks.map((task) => {
+            if (task.id !== taskId) return task;
+            beforeTask = task;
+            const candidateTask: ChecklistTask = {
+              ...task,
+              status: sanitized,
+              updatedAt: timestamp,
+              history: task.history,
+            };
+            const auditEntry = buildTaskUpdateAuditEntry(companyId, board, task, candidateTask, actor, timestamp);
+            if (auditEntry) {
+              pendingAuditEntry = auditEntry;
+            }
+
+            const nextTask: ChecklistTask = auditEntry
               ? {
-                  ...task,
-                  status: sanitized,
-                  updatedAt: timestamp,
+                  ...candidateTask,
+                  history: [...task.history, auditEntry],
                 }
-              : task
-          ),
-          updatedAt: timestamp,
-        };
-      })
+              : candidateTask;
+
+            afterTask = nextTask;
+            return nextTask;
+          });
+
+          const nextBoard: ChecklistBoard = {
+            ...board,
+            tasks: nextTasks,
+            updatedAt: timestamp,
+          };
+
+          if (afterTask) {
+            boardSnapshot = nextBoard;
+          }
+
+          return nextBoard;
+        }),
+      {
+        notifications: () =>
+          beforeTask && afterTask && boardSnapshot
+            ? describeTaskUpdates(boardSnapshot, beforeTask, afterTask)
+            : [],
+      }
     );
+
+    const auditToPersist = pendingAuditEntry;
+    void (async () => {
+      try {
+        await updateSupabaseTask(boardId, taskId, { status: sanitized });
+        await updateSupabaseBoard(boardId, {});
+        if (auditToPersist) {
+          const supabase = getSupabaseBrowserClient();
+          await insertSupabaseTaskAudit(supabase, auditToPersist);
+        }
+      } catch (error) {
+        console.error("Supabase updateChecklistTaskStatus failed", error);
+      }
+    })();
   };
 
   const markNotificationRead: AuthContextValue["markNotificationRead"] = (
@@ -993,6 +2051,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         };
       })
     );
+
+    if (UUID_REGEX.test(companyId)) {
+      const supabase = getSupabaseBrowserClient();
+      void setSupabaseNotificationRead(supabase, companyId, notificationId, read).catch((error) => {
+        console.error("Supabase setSupabaseNotificationRead failed", error);
+      });
+    }
   };
 
   const markAllNotificationsRead: AuthContextValue["markAllNotificationsRead"] = (companyId) => {
@@ -1009,6 +2074,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           : company
       )
     );
+
+    if (UUID_REGEX.test(companyId)) {
+      const supabase = getSupabaseBrowserClient();
+      void setSupabaseNotificationsAllRead(supabase, companyId).catch((error) => {
+        console.error("Supabase setSupabaseNotificationsAllRead failed", error);
+      });
+    }
   };
 
   const getUserById: AuthContextValue["getUserById"] = (userId) =>

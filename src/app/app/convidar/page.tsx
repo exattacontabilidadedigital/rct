@@ -198,7 +198,12 @@ export default function InvitePage() {
           <Card className="border-primary/20">
             <CardHeader className="space-y-1">
               <CardTitle>Enviar convite</CardTitle>
-              <CardDescription>Defina o perfil e os dados da pessoa que vai participar da preparação tributária.</CardDescription>
+              <CardDescription>
+                Defina o perfil e os dados da pessoa que vai participar da preparação tributária.
+                <span className="block text-xs text-muted-foreground">
+                  Colaboradores internos também podem ser criados diretamente em Configurações &gt; Usuários.
+                </span>
+              </CardDescription>
             </CardHeader>
             <form onSubmit={handleSubmit}>
               <CardContent className="space-y-5">

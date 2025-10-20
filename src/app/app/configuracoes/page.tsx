@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { ArrowRight, LineChart } from "lucide-react";
+import { FormEvent, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, CheckCircle2, LineChart, ShieldCheck, UserPlus, Users } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,19 +14,58 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useAuth } from "@/context/auth-context";
 import { useCompanyPortal } from "@/hooks/use-company-portal";
 import { maturityTabs } from "@/lib/dashboard-data";
 
 export default function SettingsPage() {
+  const { registerCollaborator } = useAuth();
   const { user, company, loading, companySummary } = useCompanyPortal("/app/configuracoes");
   const [preferences, setPreferences] = useState({
     weeklyDigest: true,
     shareWithAccountant: companySummary?.advisorSupport ?? true,
     autoSync: companySummary?.automation ?? false,
   });
+  const [collaboratorForm, setCollaboratorForm] = useState({ name: "", email: "", password: "" });
+  const [collaboratorFeedback, setCollaboratorFeedback] = useState<
+    { type: "success" | "error"; message: string } | null
+  >(null);
+  const [isSubmittingCollaborator, setIsSubmittingCollaborator] = useState(false);
+
+  const handleCreateCollaborator = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!company) return;
+    setIsSubmittingCollaborator(true);
+    setCollaboratorFeedback(null);
+
+    const result = await registerCollaborator({
+      name: collaboratorForm.name,
+      email: collaboratorForm.email,
+      password: collaboratorForm.password || "rtc123",
+      companyId: company.id,
+    });
+
+    setIsSubmittingCollaborator(false);
+
+    if (!result.success) {
+      setCollaboratorFeedback({
+        type: "error",
+        message: result.message ?? "Não foi possível criar o usuário.",
+      });
+      return;
+    }
+
+    setCollaboratorFeedback({
+      type: "success",
+      message: "Colaborador criado com sucesso. Compartilhe as credenciais para o primeiro acesso.",
+    });
+    setCollaboratorForm({ name: "", email: "", password: "" });
+  };
 
   if (loading || !user || !company || !companySummary) {
     return (
@@ -46,6 +86,136 @@ export default function SettingsPage() {
             Defina como a plataforma RTC compartilha informações com contadores, times internos e diretoria.
           </p>
         </header>
+
+        <section
+          id="usuarios"
+          className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,26rem)]"
+        >
+          <Card className="border-primary/40">
+            <CardHeader className="space-y-1">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <UserPlus className="h-5 w-5 text-primary" /> Criar colaborador interno
+              </CardTitle>
+              <CardDescription>
+                Cadastre usuários do time diretamente por aqui. Eles recebem acesso imediato ao checklist da empresa.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={handleCreateCollaborator} className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <Label htmlFor="collaborator-name">Nome completo</Label>
+                    <Input
+                      id="collaborator-name"
+                      placeholder="Ex.: Maria Silva"
+                      required
+                      value={collaboratorForm.name}
+                      onChange={(event) =>
+                        setCollaboratorForm((prev) => ({ ...prev, name: event.target.value }))
+                      }
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="collaborator-email">E-mail corporativo</Label>
+                    <Input
+                      id="collaborator-email"
+                      type="email"
+                      placeholder="colaborador@empresa.com"
+                      required
+                      value={collaboratorForm.email}
+                      onChange={(event) =>
+                        setCollaboratorForm((prev) => ({ ...prev, email: event.target.value }))
+                      }
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="collaborator-password">Senha inicial</Label>
+                  <Input
+                    id="collaborator-password"
+                    type="password"
+                    placeholder="Defina uma senha temporária"
+                    required
+                    value={collaboratorForm.password}
+                    onChange={(event) =>
+                      setCollaboratorForm((prev) => ({ ...prev, password: event.target.value }))
+                    }
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Compartilhe esta senha com o colaborador. Ele poderá alterar no primeiro acesso.
+                  </p>
+                </div>
+                {collaboratorFeedback ? (
+                  <div
+                    className={`rounded-md border p-3 text-sm ${
+                      collaboratorFeedback.type === "success"
+                        ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-500/10 dark:text-emerald-200"
+                        : "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-500/10 dark:text-red-200"
+                    }`}
+                  >
+                    {collaboratorFeedback.message}
+                  </div>
+                ) : null}
+                <Button type="submit" className="gap-2" disabled={isSubmittingCollaborator}>
+                  {isSubmittingCollaborator ? "Salvando..." : "Adicionar colaborador"}
+                  <Users className="h-4 w-4" />
+                </Button>
+              </form>
+            </CardContent>
+            <CardFooter className="flex flex-col gap-2 text-xs text-muted-foreground">
+              <p>Os colaboradores criados aqui entram com permissões de execução no checklist CRT-3.</p>
+              <div className="flex flex-wrap items-center gap-1">
+                <span>Para remover ou alterar acessos, utilize o painel de membros.</span>
+                <Button asChild variant="link" className="h-auto p-0 text-xs">
+                  <Link href="/app/membros">Abrir painel</Link>
+                </Button>
+              </div>
+            </CardFooter>
+          </Card>
+
+          <Card className="border-border/70">
+            <CardHeader className="space-y-2">
+              <CardTitle className="text-lg">Perfis da plataforma</CardTitle>
+              <CardDescription>
+                Defina os níveis de usuário diretamente nas configurações. Convites de contador permanecem no fluxo dedicado.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4 text-sm text-muted-foreground">
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3">
+                <Users className="mt-1 h-4 w-4 text-primary" />
+                <div>
+                  <p className="font-semibold text-foreground">Colaboradores</p>
+                  <p>Executam tarefas, atualizam status e registram evidências do checklist.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3">
+                <ShieldCheck className="mt-1 h-4 w-4 text-primary" />
+                <div>
+                  <p className="font-semibold text-foreground">Contadores</p>
+                  <p>Atuam como consultores externos e continuam sendo convidados pelo fluxo dedicado.</p>
+                </div>
+              </div>
+              <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3">
+                <CheckCircle2 className="mt-1 h-4 w-4 text-primary" />
+                <div>
+                  <p className="font-semibold text-foreground">Responsável</p>
+                  <p>Controla a empresa, configura acesso e acompanha auditoria.</p>
+                </div>
+              </div>
+            </CardContent>
+            <CardFooter className="flex flex-col gap-2">
+              <Button asChild variant="secondary" className="gap-2">
+                <Link href="/app/convidar?perfil=contador">
+                  Convidar contador
+                  <ShieldCheck className="h-4 w-4" />
+                </Link>
+              </Button>
+              <p className="text-xs text-muted-foreground">
+                Use o menu do avatar para retornar rapidamente a esta seção ou iniciar um novo convite.
+              </p>
+            </CardFooter>
+          </Card>
+        </section>
 
         <section className="grid gap-4 xl:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
           <Card className="border-primary/30">

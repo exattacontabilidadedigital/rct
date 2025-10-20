@@ -187,6 +187,96 @@ create table public.company_alerts (
 create index company_alerts_company_idx on public.company_alerts (company_id);
 create index company_alerts_status_idx on public.company_alerts (status);
 
+-- App users (internal portal accounts)
+create table public.app_users (
+  id uuid primary key default gen_random_uuid(),
+  auth_user_id uuid unique references auth.users (id) on delete set null,
+  company_id uuid references public.companies (id) on delete set null,
+  email text not null unique,
+  full_name text not null,
+  hashed_password text,
+  phone text,
+  role public.user_role not null default 'empresa',
+  status public.membership_status not null default 'active',
+  metadata jsonb not null default '{}'::jsonb,
+  last_login_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index app_users_company_idx on public.app_users (company_id);
+create index app_users_auth_user_idx on public.app_users (auth_user_id);
+
+-- Company onboarding profile responses
+create table public.company_onboarding_profiles (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  company_name text,
+  sector text,
+  regime text,
+  revenue_range text,
+  employee_size text,
+  acquisition_channel text,
+  main_goal text,
+  main_challenge text,
+  advisor_support boolean not null default false,
+  automation boolean not null default false,
+  extra_answers jsonb not null default '{}'::jsonb,
+  completed_at timestamptz,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (company_id)
+);
+
+-- Company maturity assessments history
+create table public.company_maturity_assessments (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  assessed_by uuid references public.profiles (id) on delete set null,
+  assessed_at timestamptz not null default now(),
+  overall_level public.maturity_level not null,
+  overall_score numeric(5,2),
+  dimension_scores jsonb not null default '{}'::jsonb,
+  notes text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index company_maturity_assessments_company_idx on public.company_maturity_assessments (company_id);
+create index company_maturity_assessments_assessed_by_idx on public.company_maturity_assessments (assessed_by);
+
+-- Custom checklist boards
+create table public.checklists (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references public.companies (id) on delete cascade,
+  name text not null,
+  description text,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index checklists_company_idx on public.checklists (company_id);
+
+-- Custom checklist tasks
+create table public.checklist_tasks (
+  id uuid primary key default gen_random_uuid(),
+  board_id uuid not null references public.checklists (id) on delete cascade,
+  title text not null,
+  description text,
+  severity text,
+  status text,
+  owner text not null,
+  category text not null,
+  due_date date,
+  phase text,
+  pillar text,
+  priority text,
+  reference_items jsonb,
+  evidence_items jsonb,
+  note_items jsonb,
+  tags text[],
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+create index checklist_tasks_board_idx on public.checklist_tasks (board_id);
+
 -- Triggers for updated_at
 create trigger set_timestamp before update on public.profiles
   for each row execute procedure public.set_updated_at();
@@ -208,6 +298,16 @@ create trigger set_timestamp before update on public.content_items
   for each row execute procedure public.set_updated_at();
 create trigger set_timestamp before update on public.company_alerts
   for each row execute procedure public.set_updated_at();
+create trigger set_timestamp before update on public.app_users
+  for each row execute procedure public.set_updated_at();
+create trigger set_timestamp before update on public.company_onboarding_profiles
+  for each row execute procedure public.set_updated_at();
+create trigger set_timestamp before update on public.company_maturity_assessments
+  for each row execute procedure public.set_updated_at();
+create trigger set_timestamp before update on public.checklists
+  for each row execute procedure public.set_updated_at();
+create trigger set_timestamp before update on public.checklist_tasks
+  for each row execute procedure public.set_updated_at();
 
 -- Row Level Security policies
 alter table public.profiles enable row level security;
@@ -220,6 +320,11 @@ alter table public.company_checklists enable row level security;
 alter table public.company_checklist_items enable row level security;
 alter table public.content_items enable row level security;
 alter table public.company_alerts enable row level security;
+alter table public.app_users enable row level security;
+alter table public.company_onboarding_profiles enable row level security;
+alter table public.company_maturity_assessments enable row level security;
+alter table public.checklists enable row level security;
+alter table public.checklist_tasks enable row level security;
 
 -- Profiles RLS
 create policy "View own profile" on public.profiles
@@ -300,6 +405,130 @@ create policy "Members manage checklist items" on public.company_checklist_items
       from public.company_checklists ccl
       join public.company_members cm on cm.company_id = ccl.company_id
       where ccl.id = public.company_checklist_items.company_checklist_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+
+-- App users RLS
+create policy "View own app user" on public.app_users
+  for select using (
+    auth.role() = 'service_role'
+    or auth.uid() = public.app_users.auth_user_id
+    or auth.uid() = public.app_users.id
+    or (
+      public.app_users.company_id is not null
+      and exists (
+        select 1
+        from public.company_members cm
+        where cm.company_id = public.app_users.company_id
+          and cm.profile_id = auth.uid()
+          and cm.status = 'active'
+      )
+    )
+  );
+create policy "Manage own app user" on public.app_users
+  for all using (
+    auth.role() = 'service_role'
+    or auth.uid() = public.app_users.auth_user_id
+    or auth.uid() = public.app_users.id
+  )
+  with check (
+    auth.role() = 'service_role'
+    or auth.uid() = public.app_users.auth_user_id
+    or auth.uid() = public.app_users.id
+  );
+
+-- Company onboarding profile RLS
+create policy "Members read onboarding profile" on public.company_onboarding_profiles
+  for select using (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.company_onboarding_profiles.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+create policy "Members manage onboarding profile" on public.company_onboarding_profiles
+  for all using (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.company_onboarding_profiles.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.company_onboarding_profiles.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+
+-- Company maturity assessments RLS
+create policy "Members read maturity assessments" on public.company_maturity_assessments
+  for select using (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.company_maturity_assessments.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+create policy "Members manage maturity assessments" on public.company_maturity_assessments
+  for all using (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.company_maturity_assessments.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  )
+  with check (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.company_maturity_assessments.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+
+-- RTC custom checklist boards/tasks RLS
+create policy "Members read custom checklists" on public.checklists
+  for select using (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.checklists.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+create policy "Members manage custom checklists" on public.checklists
+  for all using (
+    exists (
+      select 1
+      from public.company_members cm
+      where cm.company_id = public.checklists.company_id
+        and cm.profile_id = auth.uid()
+        and cm.status = 'active'
+    )
+  );
+create policy "Members manage custom tasks" on public.checklist_tasks
+  for all using (
+    exists (
+      select 1
+      from public.checklists c
+      join public.company_members cm on cm.company_id = c.company_id
+      where c.id = public.checklist_tasks.board_id
         and cm.profile_id = auth.uid()
         and cm.status = 'active'
     )

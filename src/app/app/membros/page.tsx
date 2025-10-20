@@ -162,7 +162,7 @@ export default function MembersPage() {
               <Badge variant="outline" className="w-fit">Gestão de acessos</Badge>
               <h1 className="text-3xl font-semibold">Pessoas conectadas</h1>
               <p className="max-w-2xl text-sm text-muted-foreground">
-                Visualize quem já está colaborando na jornada da Reforma Tributária. Convide novos membros sempre que precisar.
+                Visualize quem já está colaborando na jornada da Reforma Tributária. Use Configurações &gt; Usuários para criar colaboradores instantaneamente ou envie convites quando precisar incluir contadores e parceiros.
               </p>
             </div>
           </div>

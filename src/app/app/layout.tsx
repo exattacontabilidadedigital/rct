@@ -1,14 +1,33 @@
 "use client";
 
 import { useMemo } from "react";
-import { Bell, BellRing, Check, ClipboardList, Undo2 } from "lucide-react";
+import {
+  Bell,
+  BellRing,
+  CalendarClock,
+  Check,
+  ClipboardList,
+  ListChecks,
+  Settings,
+  Undo2,
+  UserPlus,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   Sheet,
   SheetContent,
@@ -23,7 +42,11 @@ import { useCompanyPortal } from "@/hooks/use-company-portal";
 import { severityConfig } from "@/lib/dashboard-data";
 import { formatDueDateLabel } from "@/lib/checklist";
 import { cn } from "@/lib/utils";
-import type { ChecklistPriority, NotificationSeverity } from "@/types/platform";
+import type {
+  ChecklistNotificationKind,
+  ChecklistPriority,
+  NotificationSeverity,
+} from "@/types/platform";
 
 const menuLinks = [
   { href: "/app/dashboard", label: "Dashboard" },
@@ -55,8 +78,115 @@ const priorityConfig: Record<ChecklistPriority, { label: string; className: stri
   },
 };
 
+const notificationKindConfig: Record<ChecklistNotificationKind, { label: string; icon: LucideIcon; className: string }> = {
+  task_deadline: {
+    label: "Prazo",
+    icon: CalendarClock,
+    className: "border-amber-500/50 bg-amber-500/10 text-amber-500",
+  },
+  task_event: {
+    label: "Tarefa",
+    icon: ListChecks,
+    className: "border-sky-500/50 bg-sky-500/10 text-sky-400",
+  },
+  board_event: {
+    label: "Checklist",
+    icon: ClipboardList,
+    className: "border-violet-500/50 bg-violet-500/10 text-violet-300",
+  },
+};
+
+const notificationActionStyles: Record<string, { label: string; className: string }> = {
+  created: {
+    label: "Novo",
+    className: "border-emerald-500/60 bg-emerald-500/10 text-emerald-400",
+  },
+  updated: {
+    label: "Atualização",
+    className: "border-sky-500/50 bg-sky-500/10 text-sky-400",
+  },
+  deleted: {
+    label: "Removido",
+    className: "border-destructive/60 bg-destructive/10 text-destructive",
+  },
+  completed: {
+    label: "Concluído",
+    className: "border-emerald-500/60 bg-emerald-500/10 text-emerald-400",
+  },
+  reopened: {
+    label: "Reaberto",
+    className: "border-amber-500/60 bg-amber-500/10 text-amber-500",
+  },
+};
+
+const changeLabels: Record<string, string> = {
+  owner: "Responsável",
+  dueDate: "Prazo",
+  priority: "Prioridade",
+  severity: "Severidade",
+  category: "Categoria",
+  pillar: "Pilar",
+  phase: "Fase",
+  name: "Nome",
+  description: "Descrição",
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isChangeDetail(value: unknown): value is { from: unknown; to: unknown } {
+  if (!isRecord(value)) return false;
+  return "from" in value && "to" in value;
+}
+
+function extractChangeEntries(value: unknown): Array<{ key: string; from: unknown; to: unknown }> {
+  if (!isRecord(value)) return [];
+  return Object.entries(value).flatMap(([key, detail]) =>
+    isChangeDetail(detail) ? [{ key, from: detail.from, to: detail.to }] : []
+  );
+}
+
+function readString(metadata: Record<string, unknown>, key: string): string | null {
+  const value = metadata[key];
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length ? trimmed : null;
+}
+
+function formatChangeValue(key: string, value: unknown): string {
+  if (value === null || value === undefined) {
+    if (key === "dueDate") return "Sem prazo";
+    return "—";
+  }
+
+  if (typeof value === "string") {
+    if (key === "dueDate") {
+      return value ? formatDueDateLabel(value) : "Sem prazo";
+    }
+    return value;
+  }
+
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item)).join(", ");
+  }
+
+  if (isRecord(value)) {
+    return Object.entries(value)
+      .map(([entryKey, entryValue]) => `${entryKey}: ${String(entryValue)}`)
+      .join(", ");
+  }
+
+  return String(value);
+}
+
 export default function AppLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const router = useRouter();
   const { markNotificationRead, markAllNotificationsRead } = useAuth();
   const { user, loading, company, notifications } = useCompanyPortal(pathname ?? "/app/dashboard");
 
@@ -231,6 +361,27 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                       const isOverdue = typeof dueDateValue === "number" ? dueDateValue < Date.now() : false;
                       const isUnread = !notification.read;
 
+                      const metadata = isRecord(notification.metadata) ? (notification.metadata as Record<string, unknown>) : ({} as Record<string, unknown>);
+                      const kindStyle = notificationKindConfig[notification.kind] ?? {
+                        label: "Alerta",
+                        icon: Bell,
+                        className: "border-border/60 bg-muted/40 text-muted-foreground",
+                      };
+                      const KindIcon = kindStyle.icon;
+
+                      const actionKey = readString(metadata, "action");
+                      const actionStyle = actionKey
+                        ? notificationActionStyles[actionKey] ?? {
+                            label: actionKey.charAt(0).toUpperCase() + actionKey.slice(1),
+                            className: "border-border/60 bg-muted/40 text-muted-foreground",
+                          }
+                        : null;
+
+                      const boardName = readString(metadata, "boardName");
+                      const ownerName = readString(metadata, "owner");
+                      const categoryName = readString(metadata, "category");
+                      const changeEntries = extractChangeEntries(metadata["changes"]);
+
                       return (
                         <article
                           key={notification.id}
@@ -250,6 +401,24 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                                 >
                                   {severityStyle.label}
                                 </Badge>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "flex items-center gap-1 text-[11px] font-semibold uppercase",
+                                    kindStyle.className
+                                  )}
+                                >
+                                  <KindIcon className="size-3.5" />
+                                  {kindStyle.label}
+                                </Badge>
+                                {actionStyle && (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn("text-[11px] font-semibold uppercase", actionStyle.className)}
+                                  >
+                                    {actionStyle.label}
+                                  </Badge>
+                                )}
                                 {notification.priority && (
                                   <Badge
                                     variant="outline"
@@ -269,6 +438,30 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                                 <p className="text-xs text-muted-foreground">{notification.message}</p>
                               </div>
                               <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                                {boardName && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-border/50 bg-muted/40 text-muted-foreground"
+                                  >
+                                    Checklist: {boardName}
+                                  </Badge>
+                                )}
+                                {ownerName && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-border/50 bg-muted/40 text-muted-foreground"
+                                  >
+                                    Responsável: {ownerName}
+                                  </Badge>
+                                )}
+                                {categoryName && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-border/50 bg-muted/40 text-muted-foreground"
+                                  >
+                                    Categoria: {categoryName}
+                                  </Badge>
+                                )}
                                 {notification.phase && (
                                   <Badge
                                     variant="outline"
@@ -285,22 +478,48 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
                                     {notification.pillar}
                                   </Badge>
                                 )}
-                                <Badge
-                                  variant="outline"
-                                  className={cn(
-                                    "border-border/50 bg-muted/40 text-muted-foreground",
-                                    notification.dueDate
-                                      ? isOverdue
+                                {notification.dueDate && (
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "border-border/50 bg-muted/40 text-muted-foreground",
+                                      isOverdue
                                         ? "border-destructive/60 bg-destructive/15 text-destructive"
                                         : "border-primary/40 bg-primary/10 text-primary"
-                                      : ""
-                                  )}
-                                >
-                                  {notification.dueDate
-                                    ? `${isOverdue ? "Atrasado" : "Prazo"}: ${dueLabel}`
-                                    : "Sem prazo definido"}
-                                </Badge>
+                                    )}
+                                  >
+                                    {`${isOverdue ? "Atrasado" : "Prazo"}: ${dueLabel}`}
+                                  </Badge>
+                                )}
+                                {!notification.dueDate && (
+                                  <Badge
+                                    variant="outline"
+                                    className="border-border/50 bg-muted/40 text-muted-foreground"
+                                  >
+                                    Sem prazo definido
+                                  </Badge>
+                                )}
                               </div>
+                              {changeEntries.length ? (
+                                <div className="space-y-1 rounded-md border border-border/50 bg-muted/20 p-3 text-[11px] text-muted-foreground">
+                                  <p className="text-[11px] font-semibold uppercase text-foreground/80">
+                                    Alterações registradas
+                                  </p>
+                                  <ul className="ml-4 list-disc space-y-1">
+                                    {changeEntries.map((change) => {
+                                      const label = changeLabels[change.key] ?? change.key;
+                                      return (
+                                        <li key={`${notification.id}-${change.key}`}>
+                                          <span className="font-medium text-foreground">{label}:</span>{" "}
+                                          <span>
+                                            {formatChangeValue(change.key, change.from)} → {formatChangeValue(change.key, change.to)}
+                                          </span>
+                                        </li>
+                                      );
+                                    })}
+                                  </ul>
+                                </div>
+                              ) : null}
                             </div>
                             <Button
                               type="button"
@@ -342,23 +561,51 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
               </SheetContent>
             </Sheet>
             <ThemeToggle />
-            <Link
-              href="/app/configuracoes"
-              aria-label="Abrir configurações da empresa"
-              title={user?.name ? `Configurações de ${user.name}` : "Configurações da empresa"}
-              className="group"
-            >
-              <Avatar className="size-9 border border-border/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 group-hover:border-primary/40 group-hover:ring-2 group-hover:ring-primary/15">
-                <AvatarFallback
-                  className={cn(
-                    "bg-primary/5 text-xs font-semibold uppercase text-primary",
-                    loading && "animate-pulse text-primary/70"
-                  )}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  className="group size-10 rounded-full border border-border/60 p-0 transition hover:border-primary/50 hover:bg-primary/10 focus-visible:ring-primary/30"
+                  aria-label="Abrir menu da conta"
+                  disabled={loading}
                 >
-                  {avatarInitials}
-                </AvatarFallback>
-              </Avatar>
-            </Link>
+                  <Avatar className="size-9 border border-transparent">
+                    <AvatarFallback
+                      className={cn(
+                        "bg-primary/5 text-xs font-semibold uppercase text-primary",
+                        loading && "animate-pulse text-primary/70"
+                      )}
+                    >
+                      {avatarInitials}
+                    </AvatarFallback>
+                  </Avatar>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-60">
+                <DropdownMenuLabel>
+                  <div className="flex flex-col">
+                    <span className="text-xs text-muted-foreground">Logado como</span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {user?.name ?? user?.email ?? "Usuário RTC"}
+                    </span>
+                  </div>
+                </DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem
+                  onSelect={() => router.push("/app/configuracoes")}
+                  className="cursor-pointer"
+                >
+                  <Settings className="size-4" /> Configurações da empresa
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  onSelect={() => router.push("/app/configuracoes#usuarios")}
+                  className="cursor-pointer"
+                >
+                  <UserPlus className="size-4" /> Adicionar usuário
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
       </header>

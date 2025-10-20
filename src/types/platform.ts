@@ -9,7 +9,7 @@ export interface User {
   name: string;
   email: string;
   role: UserRole;
-  password: string;
+  password?: string;
   companyId?: string;
 }
 
@@ -47,8 +47,33 @@ export interface ChecklistTaskNote {
   createdAt: string;
 }
 
+export type ChecklistTaskAuditEvent =
+  | "created"
+  | "updated"
+  | "completed"
+  | "reopened"
+  | "status_changed"
+  | "deleted";
+
+export type ChecklistTaskChangeSet = Record<string, { from: unknown; to: unknown }>;
+
+export interface ChecklistTaskAuditEntry {
+  id: string;
+  companyId: string;
+  checklistId: string;
+  taskId: string;
+  event: ChecklistTaskAuditEvent;
+  summary: string;
+  changes: ChecklistTaskChangeSet;
+  actorId?: string | null;
+  actorName?: string | null;
+  actorRole?: UserRole | null;
+  createdAt: string;
+}
+
 export interface ChecklistTask {
   id: string;
+  blueprintId?: string;
   checklistId: string;
   title: string;
   description: string;
@@ -66,6 +91,7 @@ export interface ChecklistTask {
   tags?: string[];
   createdAt: string;
   updatedAt: string;
+  history: ChecklistTaskAuditEntry[];
 }
 
 export interface ChecklistBoard {
@@ -78,9 +104,11 @@ export interface ChecklistBoard {
   tasks: ChecklistTask[];
 }
 
+export type ChecklistNotificationKind = "task_deadline" | "task_event" | "board_event";
+
 export interface ChecklistNotification {
   id: string;
-  checklistId: string;
+  checklistId?: string | null;
   taskId: string | null;
   severity: NotificationSeverity;
   title: string;
@@ -91,6 +119,8 @@ export interface ChecklistNotification {
   phase?: ChecklistPhase;
   priority?: ChecklistPriority;
   pillar?: ChecklistPillar;
+  kind: ChecklistNotificationKind;
+  metadata?: Record<string, unknown>;
 }
 
 export interface Company {

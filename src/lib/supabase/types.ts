@@ -142,6 +142,7 @@ export type Database = {
           created_by: string | null;
           id: string;
           progress: string;
+                blueprint_id: string | null;
           started_at: string;
           status: Database["public"]["Enums"]["checklist_status"];
           template_id: string;
@@ -162,6 +163,7 @@ export type Database = {
         Update: {
           company_id?: string;
           completed_at?: string | null;
+                blueprint_id?: string | null;
           created_at?: string;
           created_by?: string | null;
           id?: string;
@@ -182,6 +184,7 @@ export type Database = {
             foreignKeyName: "company_checklists_created_by_fkey";
             columns: ["created_by"];
             referencedRelation: "profiles";
+                blueprint_id?: string | null;
             referencedColumns: ["id"];
           },
           {
@@ -250,60 +253,233 @@ export type Database = {
           }
         ];
       };
-      companies: {
+      app_users: {
         Row: {
-          checklist_progress: string;
+          auth_user_id: string | null;
+          company_id: string | null;
           created_at: string;
+          email: string;
+          full_name: string;
+          hashed_password: string | null;
           id: string;
-          maturity: Database["public"]["Enums"]["maturity_level"];
+          last_login_at: string | null;
           metadata: Json;
-          name: string;
-          origin: string | null;
-          owner_profile_id: string;
-          regime: string;
-          risk_level: Database["public"]["Enums"]["risk_level"];
-          sector: string | null;
+          phone: string | null;
+          role: Database["public"]["Enums"]["user_role"];
+          status: Database["public"]["Enums"]["membership_status"];
           updated_at: string;
-          cnpj: string | null;
         };
         Insert: {
-          checklist_progress?: string;
+          auth_user_id?: string | null;
+          company_id?: string | null;
           created_at?: string;
+          email: string;
+          full_name: string;
+          hashed_password?: string | null;
           id?: string;
-          maturity?: Database["public"]["Enums"]["maturity_level"];
+          last_login_at?: string | null;
           metadata?: Json;
-          name: string;
-          origin?: string | null;
-          owner_profile_id: string;
-          regime: string;
-          risk_level?: Database["public"]["Enums"]["risk_level"];
-          sector?: string | null;
+          phone?: string | null;
+          role?: Database["public"]["Enums"]["user_role"];
+          status?: Database["public"]["Enums"]["membership_status"];
           updated_at?: string;
-          cnpj?: string | null;
         };
         Update: {
-          checklist_progress?: string;
+          auth_user_id?: string | null;
+          company_id?: string | null;
           created_at?: string;
+          email?: string;
+          full_name?: string;
+          hashed_password?: string | null;
           id?: string;
-          maturity?: Database["public"]["Enums"]["maturity_level"];
+          last_login_at?: string | null;
           metadata?: Json;
-          name?: string;
-          origin?: string | null;
-          owner_profile_id?: string;
-          regime?: string;
-          risk_level?: Database["public"]["Enums"]["risk_level"];
-          sector?: string | null;
+          phone?: string | null;
+          role?: Database["public"]["Enums"]["user_role"];
+          status?: Database["public"]["Enums"]["membership_status"];
           updated_at?: string;
-          cnpj?: string | null;
         };
         Relationships: [
           {
-            foreignKeyName: "companies_owner_profile_id_fkey";
-            columns: ["owner_profile_id"];
+            foreignKeyName: "app_users_auth_user_id_fkey";
+            columns: ["auth_user_id"];
+            referencedRelation: "users";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "app_users_company_id_fkey";
+            columns: ["company_id"];
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      company_onboarding_profiles: {
+        Row: {
+          acquisition_channel: string | null;
+          advisor_support: boolean;
+          automation: boolean;
+          company_id: string;
+          company_name: string | null;
+          completed_at: string | null;
+          created_at: string;
+          employee_size: string | null;
+          extra_answers: Json;
+          id: string;
+          main_challenge: string | null;
+          main_goal: string | null;
+          regime: string | null;
+          revenue_range: string | null;
+          sector: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          acquisition_channel?: string | null;
+          advisor_support?: boolean;
+          automation?: boolean;
+          company_id: string;
+          company_name?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          employee_size?: string | null;
+          extra_answers?: Json;
+          id?: string;
+          main_challenge?: string | null;
+          main_goal?: string | null;
+          regime?: string | null;
+          revenue_range?: string | null;
+          sector?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          acquisition_channel?: string | null;
+          advisor_support?: boolean;
+          automation?: boolean;
+          company_id?: string;
+          company_name?: string | null;
+          completed_at?: string | null;
+          created_at?: string;
+          employee_size?: string | null;
+          extra_answers?: Json;
+          id?: string;
+          main_challenge?: string | null;
+          main_goal?: string | null;
+          regime?: string | null;
+          revenue_range?: string | null;
+          sector?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "company_onboarding_profiles_company_id_fkey";
+            columns: ["company_id"];
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      company_maturity_assessments: {
+        Row: {
+          id: string;
+          company_id: string;
+          assessed_by: string | null;
+          assessed_at: string;
+          overall_level: Database["public"]["Enums"]["maturity_level"];
+          overall_score: string | null;
+          dimension_scores: Json;
+          notes: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          assessed_by?: string | null;
+          assessed_at?: string;
+          overall_level: Database["public"]["Enums"]["maturity_level"];
+          overall_score?: string | null;
+          dimension_scores?: Json;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          assessed_by?: string | null;
+          assessed_at?: string;
+          overall_level?: Database["public"]["Enums"]["maturity_level"];
+          overall_score?: string | null;
+          dimension_scores?: Json;
+          notes?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "company_maturity_assessments_company_id_fkey";
+            columns: ["company_id"];
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "company_maturity_assessments_assessed_by_fkey";
+            columns: ["assessed_by"];
             referencedRelation: "profiles";
             referencedColumns: ["id"];
           }
         ];
+      };
+      companies: {
+        Row: {
+          id: string;
+          name: string;
+          cnpj: string | null;
+          regime: string | null;
+          sector: string | null;
+          origin: string | null;
+          maturity: Database["public"]["Enums"]["maturity_level"];
+          risk_level: Database["public"]["Enums"]["notification_severity"];
+          checklist_progress: string;
+          employees: string[];
+          accountant_ids: string[];
+          metadata: Json | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          cnpj?: string | null;
+          regime?: string | null;
+          sector?: string | null;
+          origin?: string | null;
+          maturity?: Database["public"]["Enums"]["maturity_level"];
+          risk_level?: Database["public"]["Enums"]["notification_severity"];
+          checklist_progress?: string;
+          employees?: string[];
+          accountant_ids?: string[];
+          metadata?: Json | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          name?: string;
+          cnpj?: string | null;
+          regime?: string | null;
+          sector?: string | null;
+          origin?: string | null;
+          maturity?: Database["public"]["Enums"]["maturity_level"];
+          risk_level?: Database["public"]["Enums"]["notification_severity"];
+          checklist_progress?: string;
+          employees?: string[];
+          accountant_ids?: string[];
+          metadata?: Json | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
       };
       content_items: {
         Row: {
@@ -411,6 +587,265 @@ export type Database = {
             foreignKeyName: "checklist_items_template_id_fkey";
             columns: ["template_id"];
             referencedRelation: "checklist_templates";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      checklists: {
+        Row: {
+          id: string;
+          company_id: string;
+          name: string;
+          description: string | null;
+          created_at: string;
+          updated_at: string;
+          legacy_id: string | null;
+          reference_date: string | null;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          name: string;
+          description?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          legacy_id?: string | null;
+          reference_date?: string | null;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          name?: string;
+          description?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          legacy_id?: string | null;
+          reference_date?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "checklists_company_id_fkey";
+            columns: ["company_id"];
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      checklist_notifications: {
+        Row: {
+          id: string;
+          company_id: string;
+          checklist_id: string | null;
+          task_id: string | null;
+          kind: string;
+          severity: string;
+          title: string;
+          message: string;
+          read: boolean;
+          due_date: string | null;
+          phase: string | null;
+          pillar: string | null;
+          priority: string | null;
+          metadata: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          checklist_id?: string | null;
+          task_id?: string | null;
+          kind: string;
+          severity: string;
+          title: string;
+          message: string;
+          read?: boolean;
+          due_date?: string | null;
+          phase?: string | null;
+          pillar?: string | null;
+          priority?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          checklist_id?: string | null;
+          task_id?: string | null;
+          kind?: string;
+          severity?: string;
+          title?: string;
+          message?: string;
+          read?: boolean;
+          due_date?: string | null;
+          phase?: string | null;
+          pillar?: string | null;
+          priority?: string | null;
+          metadata?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "checklist_notifications_company_id_fkey";
+            columns: ["company_id"];
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "checklist_notifications_checklist_id_fkey";
+            columns: ["checklist_id"];
+            referencedRelation: "checklists";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "checklist_notifications_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "checklist_tasks";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      checklist_task_audits: {
+        Row: {
+          id: string;
+          company_id: string;
+          checklist_id: string;
+          task_id: string;
+          actor_id: string | null;
+          actor_name: string | null;
+          actor_role: string | null;
+          event: string;
+          summary: string;
+          changes: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          company_id: string;
+          checklist_id: string;
+          task_id: string;
+          actor_id?: string | null;
+          actor_name?: string | null;
+          actor_role?: string | null;
+          event: string;
+          summary: string;
+          changes?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          company_id?: string;
+          checklist_id?: string;
+          task_id?: string;
+          actor_id?: string | null;
+          actor_name?: string | null;
+          actor_role?: string | null;
+          event?: string;
+          summary?: string;
+          changes?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "checklist_task_audits_actor_id_fkey";
+            columns: ["actor_id"];
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "checklist_task_audits_checklist_id_fkey";
+            columns: ["checklist_id"];
+            referencedRelation: "checklists";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "checklist_task_audits_company_id_fkey";
+            columns: ["company_id"];
+            referencedRelation: "companies";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "checklist_task_audits_task_id_fkey";
+            columns: ["task_id"];
+            referencedRelation: "checklist_tasks";
+            referencedColumns: ["id"];
+          }
+        ];
+      };
+      checklist_tasks: {
+        Row: {
+          id: string;
+          board_id: string;
+          blueprint_id: string | null;
+          title: string;
+          description: string;
+          severity: string;
+          status: string;
+          owner: string;
+          category: string;
+          due_date: string | null;
+          phase: string | null;
+          pillar: string | null;
+          priority: string | null;
+          reference_items: Json | null;
+          evidence_items: Json | null;
+          note_items: Json | null;
+          tags: string[] | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          board_id: string;
+          blueprint_id?: string | null;
+          title: string;
+          description?: string;
+          severity?: string;
+          status?: string;
+          owner: string;
+          category: string;
+          due_date?: string | null;
+          phase?: string | null;
+          pillar?: string | null;
+          priority?: string | null;
+          reference_items?: Json | null;
+          evidence_items?: Json | null;
+          note_items?: Json | null;
+          tags?: string[] | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          board_id?: string;
+          blueprint_id?: string | null;
+          title?: string;
+          description?: string;
+          severity?: string;
+          status?: string;
+          owner?: string;
+          category?: string;
+          due_date?: string | null;
+          phase?: string | null;
+          pillar?: string | null;
+          priority?: string | null;
+          reference_items?: Json;
+          evidence_items?: Json;
+          note_items?: Json;
+          tags?: string[] | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "checklist_tasks_board_id_fkey";
+            columns: ["board_id"];
+            referencedRelation: "checklists";
             referencedColumns: ["id"];
           }
         ];
@@ -533,7 +968,45 @@ export type Database = {
       };
     };
   Views: Record<string, never>;
-  Functions: Record<string, never>;
+  Functions: {
+    cleanup_orphan_checklist_notifications: {
+      Args: {
+        limit_count?: number | null;
+      };
+      Returns: {
+        deleted_id: string;
+      }[];
+    };
+    company_actor_can_access: {
+      Args: {
+        company_uuid: string;
+      };
+      Returns: boolean;
+    };
+    mark_company_notifications_read: {
+      Args: {
+        company_uuid: string;
+        notification_ids?: string[] | null;
+        mark_read?: boolean | null;
+      };
+      Returns: number;
+    };
+    delete_company_notifications: {
+      Args: {
+        company_uuid: string;
+        notification_ids: string[];
+      };
+      Returns: number;
+    };
+    sync_company_notifications: {
+      Args: {
+        company_uuid: string;
+        notifications?: Json;
+        remove_missing?: boolean | null;
+      };
+      Returns: number;
+    };
+  };
     Enums: {
       alert_status: "active" | "resolved";
       checklist_item_status: "pending" | "in_progress" | "completed" | "blocked";
@@ -543,6 +1016,7 @@ export type Database = {
       maturity_level: "inicial" | "em_adaptacao" | "avancado";
       membership_status: "active" | "invited" | "inactive";
       risk_level: "verde" | "laranja" | "vermelho";
+      notification_severity: "verde" | "laranja" | "vermelho";
       user_role: "empresa" | "colaborador" | "contador";
     };
   };

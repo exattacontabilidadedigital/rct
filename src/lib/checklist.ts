@@ -1,6 +1,7 @@
 import type {
   ChecklistBoard,
   ChecklistNotification,
+  ChecklistNotificationKind,
   ChecklistTask,
   ChecklistTaskStatus,
   ChecklistPhase,
@@ -22,6 +23,8 @@ import {
   parseISO,
   startOfMonth,
 } from "date-fns";
+
+import { generateDeterministicUuid, generateUuid } from "@/lib/id";
 
 const severityWeight: Record<NotificationSeverity, number> = {
   verde: 1,
@@ -655,9 +658,11 @@ function instantiateBlueprintTask(
 ): ChecklistTask {
   const { checklistId, referenceDate, timestamp } = options;
   const dueDate = typeof task.dueInDays === "number" ? futureDateISO(referenceDate, task.dueInDays) : undefined;
+  const generatedId = generateDeterministicUuid(`${checklistId}:${task.id}`);
 
   return {
-    id: task.id,
+    id: generatedId,
+    blueprintId: task.id,
     checklistId,
     title: task.title,
     description: task.description,
@@ -675,6 +680,7 @@ function instantiateBlueprintTask(
     tags: cloneTags(task.tags),
     createdAt: timestamp,
     updatedAt: timestamp,
+    history: [],
   };
 }
 
@@ -701,9 +707,13 @@ export function instantiateChecklistBlueprint({
 
 export const defaultChecklistTasks: ChecklistTask[] = instantiateChecklistBlueprint({ checklistId: "checklist-essencial" });
 
-export function createDefaultChecklistBoard(companyId: string): ChecklistBoard {
-  const timestamp = nowISO();
-  const checklistId = `${companyId}-checklist-essencial`;
+export function createDefaultChecklistBoard(
+  companyId: string,
+  options: { checklistId?: string; createdAt?: string; referenceDate?: Date } = {}
+): ChecklistBoard {
+  const timestamp = options.createdAt ?? nowISO();
+  const checklistId = options.checklistId ?? generateDeterministicUuid(`${companyId}:default-checklist`);
+  const referenceDate = options.referenceDate ?? new Date(timestamp);
 
   return {
     id: checklistId,
@@ -712,7 +722,7 @@ export function createDefaultChecklistBoard(companyId: string): ChecklistBoard {
     description: "Sequência guiada para adaptação do CRT 3 ao IBS/CBS com obrigatoriedades de 2026.",
     createdAt: timestamp,
     updatedAt: timestamp,
-    tasks: instantiateChecklistBlueprint({ checklistId, timestamp }),
+    tasks: instantiateChecklistBlueprint({ checklistId, timestamp, referenceDate }),
   };
 }
 
@@ -725,6 +735,7 @@ export function cloneChecklistTask(task: ChecklistTask, overrides: Partial<Check
     evidences: cloneEvidences(overrides.evidences ?? task.evidences),
     notes: cloneNotes(overrides.notes ?? task.notes),
     tags: cloneTags(overrides.tags ?? task.tags),
+    history: overrides.history ?? [...task.history],
     updatedAt: overrides.updatedAt ?? timestamp,
   };
 }
@@ -888,25 +899,103 @@ export function resolveNotificationSeverity(task: ChecklistTask): NotificationSe
   return task.severity;
 }
 
+type DeadlineState = "unscheduled" | "future" | "upcoming" | "due-today" | "overdue";
+
+type DeadlineDetails = {
+  severity: NotificationSeverity;
+  message: string;
+  metadata: {
+    deadlineState: DeadlineState;
+    daysUntilDue?: number;
+  };
+};
+
+function buildDeadlineNotificationDetails(task: ChecklistTask): DeadlineDetails {
+  if (!task.dueDate) {
+    return {
+      severity: task.severity,
+      message: "Sem prazo definido.",
+      metadata: {
+        deadlineState: "unscheduled",
+      },
+    };
+  }
+
+  const due = parseISO(task.dueDate);
+  const today = new Date();
+  const daysDiff = differenceInCalendarDays(due, today);
+  const dueLabel = formatDueDateLabel(task.dueDate);
+
+  if (daysDiff < 0) {
+    return {
+      severity: "vermelho",
+      message: `Atrasado há ${Math.abs(daysDiff)} dia(s) (desde ${dueLabel}).`,
+      metadata: {
+        deadlineState: "overdue",
+        daysUntilDue: daysDiff,
+      },
+    };
+  }
+
+  if (daysDiff === 0) {
+    return {
+      severity: "vermelho",
+      message: `Vence hoje (${dueLabel}).`,
+      metadata: {
+        deadlineState: "due-today",
+        daysUntilDue: daysDiff,
+      },
+    };
+  }
+
+  if (daysDiff <= 3) {
+    return {
+      severity: "laranja",
+      message: `Faltam ${daysDiff} dia(s) (${dueLabel}).`,
+      metadata: {
+        deadlineState: "upcoming",
+        daysUntilDue: daysDiff,
+      },
+    };
+  }
+
+  return {
+    severity: task.severity,
+    message: `Planejado para ${dueLabel}.`,
+    metadata: {
+      deadlineState: "future",
+      daysUntilDue: daysDiff,
+    },
+  };
+}
+
 export function buildChecklistNotifications(
   boards: ChecklistBoard[],
   previous: ChecklistNotification[] = []
 ): ChecklistNotification[] {
-  const readMap = new Map(previous.map((notification) => [notification.id, notification.read]));
+  const normalizedPrevious = previous.map((notification) =>
+    notification.kind
+      ? notification
+      : {
+          ...notification,
+          kind: "task_deadline" as ChecklistNotificationKind,
+        }
+  );
 
-  return boards.flatMap((board) =>
+  const deadlineReadMap = new Map(
+    normalizedPrevious
+      .filter((notification) => notification.kind === "task_deadline")
+      .map((notification) => [notification.id, notification.read])
+  );
+
+  const eventNotifications = normalizedPrevious.filter((notification) => notification.kind !== "task_deadline");
+
+  const deadlineNotifications = boards.flatMap((board) =>
     board.tasks
       .filter((task) => task.status !== "done")
       .map<ChecklistNotification>((task) => {
-        const severity = resolveNotificationSeverity(task);
-        const dueLabel = task.dueDate ? formatDueDateLabel(task.dueDate) : null;
-        const message = task.dueDate
-          ? severity === "vermelho"
-            ? `Atrasado desde ${dueLabel}.`
-            : `Vence em ${dueLabel}.`
-          : "Sem prazo definido.";
-
-        const id = `${board.id}-${task.id}`;
+  const { severity, message, metadata } = buildDeadlineNotificationDetails(task);
+  const id = generateDeterministicUuid(`${board.id}:${task.id}`);
 
         return {
           id,
@@ -916,14 +1005,51 @@ export function buildChecklistNotifications(
           title: task.title,
           message,
           dueDate: task.dueDate,
-          createdAt: task.createdAt,
-          read: readMap.get(id) ?? false,
+          createdAt: task.updatedAt ?? task.createdAt,
+          read: deadlineReadMap.get(id) ?? false,
           phase: task.phase,
           priority: task.priority,
           pillar: task.pillar,
+          kind: "task_deadline",
+          metadata,
         };
       })
   );
+
+  return [...eventNotifications, ...deadlineNotifications];
+}
+
+type EventNotificationParams = {
+  kind: Exclude<ChecklistNotificationKind, "task_deadline">;
+  checklistId: string;
+  severity: NotificationSeverity;
+  title: string;
+  message: string;
+  taskId?: string | null;
+  dueDate?: string;
+  phase?: ChecklistPhase;
+  priority?: ChecklistPriority;
+  pillar?: ChecklistPillar;
+  metadata?: Record<string, unknown>;
+};
+
+export function createChecklistEventNotification(params: EventNotificationParams): ChecklistNotification {
+  return {
+    id: generateUuid(),
+    checklistId: params.checklistId,
+    taskId: params.taskId ?? null,
+    severity: params.severity,
+    title: params.title,
+    message: params.message,
+    dueDate: params.dueDate,
+    createdAt: nowISO(),
+    read: false,
+    phase: params.phase,
+    priority: params.priority,
+    pillar: params.pillar,
+    kind: params.kind,
+    metadata: params.metadata,
+  };
 }
 
 export function mergeNotifications(

@@ -9,10 +9,14 @@ let browserClient: SupabaseClient<Database> | null = null;
 
 export const getSupabaseBrowserClient = () => {
   if (!browserClient) {
-    browserClient = createClient<Database>(getSupabaseUrl(), getSupabaseAnonKey(), {
+    const url = getSupabaseUrl();
+    const key = getSupabaseAnonKey();
+    
+    browserClient = createClient<Database>(url, key, {
       auth: {
         persistSession: true,
         detectSessionInUrl: true,
+        flowType: 'implicit',
       },
     });
   }
